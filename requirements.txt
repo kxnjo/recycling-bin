@@ -19,6 +19,7 @@ numpy==2.4.3
 opencv-python==4.13.0.92
 opencv-python-headless==4.13.0.92
 packaging==26.0
+paho-mqtt==1.6.1
 pillow==12.1.1
 polars==1.39.2
 polars-runtime-32==1.39.2
