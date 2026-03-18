@@ -1,5 +1,5 @@
 # .gitignore
-venv/
+.venv/
 __pycache__/
 capture.jpg
 images/
