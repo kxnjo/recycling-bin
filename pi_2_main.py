@@ -3,8 +3,8 @@ import cv2
 import numpy as np
 
 import ai_vision
-
-BROKER = "10.224.74.120"
+# TO UPDATE IP ADDRESS IN mqtt_publisher.py AS WELL
+BROKER = "10.174.191.120"
 
 IMAGE_TOPIC = "smartbin/image"
 RESULT_TOPIC = "smartbin/result"
@@ -41,3 +41,8 @@ client.connect(BROKER,1883)
 client.subscribe(IMAGE_TOPIC)
 
 client.loop_forever()
+
+print("[Pi 2] AI Processor initialized.")
+print(f"[Pi 2] Connected to MQTT broker at {BROKER}")
+print(f"[Pi 2] Subscribed to topic: {IMAGE_TOPIC}")
+print("[Pi 2] Waiting for images...\n")

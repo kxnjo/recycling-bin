@@ -2,6 +2,7 @@
 from threading import Thread, Event
 from signal import pause
 from time import sleep
+import cv2
 
 import config
 import hardware
@@ -11,7 +12,7 @@ import mqtt_publisher
 capture_event = Event()
 
 # ================================
-# 🎯 BUTTON ROUTING
+# ðŸŽ¯ BUTTON ROUTING
 # ================================
 def handle_button_press(btn):
     angle = hardware.BUTTON_ANGLES[btn]
@@ -24,7 +25,7 @@ hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
 
 
 # ================================
-# 🧠 AI ROUTING
+# ðŸ§  AI ROUTING
 # ================================
 def process_ai_detection():
     # 1. Take picture and get result from ai_vision module
@@ -92,7 +93,7 @@ def handle_inference_result(result):
         print("[AI RESULT] Unknown label:", result)
 
 # ================================
-# 👀 DISTANCE MONITOR
+# ðŸ‘€ DISTANCE MONITOR
 # ================================
 def monitor_detection():
     """Continuously monitor the 'd' sensor and trigger AI."""
@@ -119,7 +120,7 @@ def monitor_detection():
 mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
 
 # ================================
-# 🚀 START SYSTEM
+# ðŸš€ START SYSTEM
 # ================================
 if __name__ == "__main__":
     Thread(target=monitor_detection, daemon=True).start()

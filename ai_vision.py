@@ -3,6 +3,7 @@ import time
 import cv2
 from ultralytics import YOLO
 import config
+import numpy as np
 
 print(f"Loading custom YOLO Classification model from {config.MODEL_PATH}...")
 model = YOLO(config.MODEL_PATH)
@@ -85,7 +86,7 @@ def do_infer(image_bytes):
 
     img_path = "capture.jpg"
     cv2.imwrite(img_path, frame)
-    print(f"\n[CAMERA] Image saved as {img_path}. Starting local inference...")
+    print(f"\n[CAMERA] Image saved as {img_path}. Starting inference on Pi 2...")
 
     # Grab the resolution from config
     res = config.INFERENCE_RES
