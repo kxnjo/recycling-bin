@@ -6,7 +6,8 @@ from time import sleep
 import config
 import hardware
 import ai_vision
-
+# MQTT
+import mqtt_publisher
 capture_event = Event()
 
 # ================================
@@ -42,6 +43,55 @@ def process_ai_detection():
     capture_event.clear()
 
 # ================================
+# CAMERA CAPTURE & MQTT SENDING
+# ================================
+def camera_capture():
+    print("[main.py CAMERA] Capturing image from webcam...")
+    capture_event.set() 
+    cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        print("[ERROR] Could not open webcam")
+        exit()
+
+    # Capture one frame
+    ret, frame = cap.read()
+
+    if not ret:
+        print("[ERROR] Failed to capture image")
+    else:
+        cv2.imwrite("capture.jpg", frame)
+        print("Image saved as capture.jpg")
+        # Encode image to bytes
+        success, buffer = cv2.imencode('.jpg', frame)
+        if not success:
+            print("[ERROR] Failed to encode image")
+            return
+
+        image_bytes = buffer.tobytes()
+
+        # Send via MQTT
+        mqtt_publisher.send_image(image_bytes)
+
+    cap.release()
+
+# ================================
+# ACTION AFTER RECEIVING MQTT RESULT
+# ================================
+def handle_inference_result(result):
+    print("[AI RESULT] Received:", result)
+
+    # Example: trigger servo movement based on AI result
+    if result.lower() == "plastic":
+        Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
+    elif result.lower() == "paper":
+        Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
+    elif result.lower() == "general":
+        Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
+    else:
+        print("[AI RESULT] Unknown label:", result)
+
+# ================================
 # 👀 DISTANCE MONITOR
 # ================================
 def monitor_detection():
@@ -56,14 +106,17 @@ def monitor_detection():
                     print(f"\n[DETECT] Object detected at {round(distance, 1)} cm!")
                     
                     # Lock the capture event and spin up AI thread
-                    capture_event.set()
-                    Thread(target=process_ai_detection, daemon=True).start()
+                    camera_capture()
+                    capture_event.clear()
+                    # Thread(target=camera_capture, daemon=True).start()
                     
                     sleep(2) # Cooldown
             except Exception as e:
                 print(f"[ERROR] Sensor read failed: {e}")
         
         sleep(0.1)
+
+mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
 
 # ================================
 # 🚀 START SYSTEM
