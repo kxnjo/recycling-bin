@@ -1,0 +1,24 @@
+name: Deploy to Raspberry Pi 5
+
+on:
+  push:
+    branches: [ "main" ] # Triggers whenever you push to main
+
+jobs:
+  deploy:
+    # This tells GitHub to run this script ON your Raspberry Pi!
+    runs-on: self-hosted 
+
+    steps:
+      - name: 📥 Download latest code from GitHub
+        uses: actions/checkout@v4
+
+      - name: 🔄 Sync files to your Desktop assignment folder
+        run: |
+          # rsync copies the new files to your working folder, ignoring the venv
+          rsync -av --exclude='venv' --exclude='.git' ./ /home/dougey/Desktop/assignment/
+
+      - name: 🚀 Restart the Smart Bin AI
+        run: |
+          # Bounces the background service to apply the new Python code
+          sudo systemctl restart smartbin
