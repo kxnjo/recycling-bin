@@ -15,7 +15,7 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ==========================================
-# 🔌 STATE INITIALIZATION (Required for MQTT)
+# STATE INITIALIZATION (Required for MQTT)
 # ==========================================
 # Starts at 0, waits for MQTT to send real data
 if 'bin_data' not in st.session_state:
