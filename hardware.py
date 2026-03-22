@@ -89,7 +89,7 @@ def run_sequence(target_angle):
         servo.angle = config.MAIN_HOME
         sleep(1.0) 
 
-        update_bin_levels()
+        # update_bin_levels() changing to call in main.py after receiving AI result
 
     finally:
         seq_lock.release()

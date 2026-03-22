@@ -23,3 +23,8 @@ def subscribe_results(on_result_callback):
 
     client.subscribe(RESULT_TOPIC)
     client.on_message = on_message
+
+def send_bin_levels(levels: dict):
+    payload = json.dumps(levels)
+    client.publish("smartbin/bin_levels", payload)
+    print(f"[MQTT] Sent bin levels: {payload}")

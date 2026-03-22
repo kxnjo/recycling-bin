@@ -1,7 +1,7 @@
 # main.py
 from threading import Thread, Event
 from signal import pause
-from time import sleep
+from time import sleep, time
 import cv2
 
 import config
@@ -39,7 +39,14 @@ def process_ai_detection():
         Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
     else: # general
         Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
-    
+
+    hardware.seq_lock.acquire()  # wait until servo finishes
+    bin_levels = hardware.update_bin_levels()
+    bin_levels['label'] = target_bin
+    bin_levels['timestamp'] = int(time.time())
+    mqtt_publisher.send_bin_levels(bin_levels)  # send via MQTT
+    hardware.seq_lock.release()
+
     # 3. Unlock the event
     capture_event.clear()
 
