@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 
-const API_URL = "http://localhost:5000/bin"; // TODO: change to your Flask server IP if needed
+const API_URL = "https://zoax1qwl2f.execute-api.us-east-1.amazonaws.com/bin"; // TODO: change to your Flask server IP if needed
 const POLL_INTERVAL = 3000; // ms
 
 const bins = [
@@ -110,6 +110,8 @@ export default function App() {
     const fetchData = async () => {
       try {
         const res = await fetch(API_URL);
+        console.log("Response status:", res.status);
+
         if (!res.ok) throw new Error("Not OK");
         const data = await res.json();
         setApiStatus("online");
