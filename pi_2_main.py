@@ -5,16 +5,16 @@ import json
 import ai_vision
 # TO UPDATE IP ADDRESS IN mqtt_publisher.py AS WELL
 # BROKER = "10.174.191.120"
-BROKER = "10.39.196.33"  # for local testing
+BROKER = "10.39.196.120"  # for local testing
 
-IMAGE_TOPIC = "smartbin/image_request"
+IMAGE_TOPIC = "smartbin/image"
 ACK_TOPIC = "smartbin/image_ack"
 RESULT_TOPIC = "smartbin/result"
 STATUS_TOPIC = "smartbin/status"
 
 client = mqtt.Client("AI_Processor")
 
-# Last Will → if Pi2 crashes, broker sends offline
+# Last Will â†’ if Pi2 crashes, broker sends offline
 client.will_set(STATUS_TOPIC, payload="offline", retain=True)
 
 def on_message(client, userdata, msg):
@@ -22,7 +22,6 @@ def on_message(client, userdata, msg):
 
     request_id = data["id"]
     image_hex = data["image"]
-
     image_bytes = bytes.fromhex(image_hex)
 
     # Run inference
@@ -34,7 +33,7 @@ def on_message(client, userdata, msg):
         "label": label
     }
 
-    client.publish("result/topic", json.dumps(response), qos=1)
+    client.publish("smartbin/result", json.dumps(response), qos=1)
 
 client.on_message = on_message
 
@@ -46,3 +45,7 @@ client.publish(STATUS_TOPIC, payload="alive", retain=True)
 
 client.subscribe(IMAGE_TOPIC)
 print("[Pi2] AI Processor initialized, waiting for images...")
+
+# Keep the script alive
+from signal import pause
+pause()

@@ -6,7 +6,14 @@ import config
 import numpy as np
 
 # print(f"Loading custom YOLO Classification model from {config.MODEL_PATH}...")
-model = YOLO(config.MODEL_PATH)
+# model = YOLO(config.MODEL_PATH)
+
+model = None 
+def init_model():
+    global model
+    print(f"Loading YOLO model from {config.MODEL_PATH}...")
+    model = YOLO(config.MODEL_PATH)
+    
 
 def capture_and_infer():
     """Captures an image, runs Custom YOLO Classification, and returns the target bin category."""
