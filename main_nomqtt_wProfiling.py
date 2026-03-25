@@ -3,7 +3,7 @@ from time import sleep, time
 import sys
 
 import config
-import hardware
+import hardware_wProfiling
 import ai_vision
 from profiler import profile_block, now, log_profile
 
@@ -18,14 +18,14 @@ run_once_completed = Event()
 # 🎯 BUTTON ROUTING
 # ================================
 def handle_button_press(btn):
-    angle = hardware.BUTTON_ANGLES[btn]
-    Thread(target=hardware.run_sequence, args=(angle,), daemon=True).start()
+    angle = hardware_wProfiling.BUTTON_ANGLES[btn]
+    Thread(target=hardware_wProfiling.run_sequence, args=(angle,), daemon=True).start()
 
 
 # Attach the handlers
-hardware.button1.when_pressed = lambda: handle_button_press(hardware.button1)
-hardware.button2.when_pressed = lambda: handle_button_press(hardware.button2)
-hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
+hardware_wProfiling.button1.when_pressed = lambda: handle_button_press(hardware_wProfiling.button1)
+hardware_wProfiling.button2.when_pressed = lambda: handle_button_press(hardware_wProfiling.button2)
+hardware_wProfiling.button3.when_pressed = lambda: handle_button_press(hardware_wProfiling.button3)
 
 
 # ================================
@@ -46,7 +46,7 @@ def process_ai_detection():
             print(f"[PROFILE] detect_to_infer_done: {detect_to_infer_done_ms:.2f} ms")
             log_profile("detect_to_infer_done", detect_to_infer_done_ms, f"label={target_bin}")
 
-        # 2. Trigger hardware based on result
+        # 2. Trigger hardware_wProfiling based on result
         print(f"[ACTION] Routing item to {target_bin.upper()} bin...")
 
         with profile_block("route_decision", extra=f"label={target_bin}"):
@@ -58,7 +58,7 @@ def process_ai_detection():
                 target_angle = 0
 
             servo_thread = Thread(
-                target=hardware.run_sequence,
+                target=hardware_wProfiling.run_sequence,
                 args=(target_angle,),
                 daemon=True
             )
@@ -66,7 +66,7 @@ def process_ai_detection():
 
         # 3. Wait until servo finishes
         servo_wait_start = now()
-        hardware.seq_lock.acquire()   # blocks until run_sequence releases
+        hardware_wProfiling.seq_lock.acquire()   # blocks until run_sequence releases
         servo_wait_ms = (now() - servo_wait_start) * 1000
         print(f"[PROFILE] wait_for_servo_finish: {servo_wait_ms:.2f} ms")
         log_profile("wait_for_servo_finish", servo_wait_ms, f"label={target_bin}")
@@ -74,7 +74,7 @@ def process_ai_detection():
         try:
             # 4. Update bin levels
             with profile_block("update_bin_levels", extra=f"label={target_bin}"):
-                bin_levels = hardware.update_bin_levels()
+                bin_levels = hardware_wProfiling.update_bin_levels()
 
             bin_levels["label"] = target_bin
             bin_levels["timestamp"] = int(time())
@@ -82,7 +82,7 @@ def process_ai_detection():
             print("[INFO] Final bin levels:", bin_levels)
 
         finally:
-            hardware.seq_lock.release()
+            hardware_wProfiling.seq_lock.release()
 
         total_pipeline_ms = (now() - pipeline_start) * 1000
         print(f"[PROFILE] total_ai_pipeline: {total_pipeline_ms:.2f} ms")
@@ -102,10 +102,10 @@ def process_ai_detection():
 def monitor_detection_once():
     """Monitor the detect sensor until one item is detected, then stop."""
     global last_detected_at
-    detect_sensor = hardware.sensors["d"]
+    detect_sensor = hardware_wProfiling.sensors["d"]
 
     while not run_once_completed.is_set():
-        if not hardware.seq_lock.locked() and not capture_event.is_set():
+        if not hardware_wProfiling.seq_lock.locked() and not capture_event.is_set():
             try:
                 with profile_block("detect_sensor_read"):
                     distance = detect_sensor.distance * 100  # cm
