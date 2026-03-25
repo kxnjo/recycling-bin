@@ -13,9 +13,14 @@ client = mqtt.Client("SmartBin_Publisher")
 client.connect(BROKER, 1883)
 client.loop_start()
 
-def send_image(image_bytes):
+# def send_image(image_bytes):
+#     """Publish image bytes to AI processing Pi."""
+#     client.publish(IMAGE_TOPIC, image_bytes)
+#     print("[MQTT] Image sent to broker")
+
+def send_image(payload, qos=1):
     """Publish image bytes to AI processing Pi."""
-    client.publish(IMAGE_TOPIC, image_bytes)
+    client.publish(IMAGE_TOPIC, payload, qos=qos)
     print("[MQTT] Image sent to broker")
 
 def subscribe_results(on_result_callback):

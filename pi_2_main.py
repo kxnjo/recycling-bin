@@ -1,48 +1,48 @@
 import paho.mqtt.client as mqtt
 import cv2
 import numpy as np
-
+import json
 import ai_vision
 # TO UPDATE IP ADDRESS IN mqtt_publisher.py AS WELL
-BROKER = "10.174.191.120"
+# BROKER = "10.174.191.120"
+BROKER = "10.39.196.33"  # for local testing
 
-IMAGE_TOPIC = "smartbin/image"
+IMAGE_TOPIC = "smartbin/image_request"
+ACK_TOPIC = "smartbin/image_ack"
 RESULT_TOPIC = "smartbin/result"
-
-
-def on_message(client, userdata, msg):
-
-    print("Image received")
-
-    image_bytes = msg.payload
-
-    np_arr = np.frombuffer(image_bytes, np.uint8)
-
-    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
-    if frame is None:
-        print("Decode failed")
-        return
-
-    # result = classify_image(frame)
-    result = ai_vision.do_infer(image_bytes)
-    print("[Pi 2] Model Prediction:", result)
-
-    client.publish(RESULT_TOPIC, result)
-
-    print("[Pi 2] Result sent back")
+STATUS_TOPIC = "smartbin/status"
 
 client = mqtt.Client("AI_Processor")
 
+# Last Will → if Pi2 crashes, broker sends offline
+client.will_set(STATUS_TOPIC, payload="offline", retain=True)
+
+def on_message(client, userdata, msg):
+    data = json.loads(msg.payload)
+
+    request_id = data["id"]
+    image_hex = data["image"]
+
+    image_bytes = bytes.fromhex(image_hex)
+
+    # Run inference
+    label = ai_vision.do_infer(image_bytes)
+
+    # Send result back
+    response = {
+        "id": request_id,
+        "label": label
+    }
+
+    client.publish("result/topic", json.dumps(response), qos=1)
+
 client.on_message = on_message
 
-client.connect(BROKER,1883)
+client.connect(BROKER, 1883)
+client.loop_start()
+
+# Publish "alive" after connecting (retain=True)
+client.publish(STATUS_TOPIC, payload="alive", retain=True)
 
 client.subscribe(IMAGE_TOPIC)
-
-client.loop_forever()
-
-print("[Pi 2] AI Processor initialized.")
-print(f"[Pi 2] Connected to MQTT broker at {BROKER}")
-print(f"[Pi 2] Subscribed to topic: {IMAGE_TOPIC}")
-print("[Pi 2] Waiting for images...\n")
+print("[Pi2] AI Processor initialized, waiting for images...")
