@@ -27,8 +27,9 @@ def on_message(client, userdata, msg):
 # ------------------------------
 def start_mqtt():
     client = mqtt.Client()
-    client.connect("10.174.191.241", 1883)  # to match BROKER IP !!
-    client.subscribe("smartbin/data")
+    # client.connect("10.174.191.241", 1883)  # to match BROKER IP !!
+    client.connect("10.39.196.120", 1883)  # to match BROKER IP !!
+    client.subscribe("smartbin/bin_levels")
     client.on_message = on_message
     client.loop_forever()
 

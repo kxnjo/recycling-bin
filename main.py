@@ -12,7 +12,7 @@ import mqtt_publisher
 capture_event = Event()
 
 # ================================
-# ðŸŽ¯ BUTTON ROUTING
+# Ã°Å¸Å½Â¯ BUTTON ROUTING
 # ================================
 def handle_button_press(btn):
     angle = hardware.BUTTON_ANGLES[btn]
@@ -25,7 +25,7 @@ hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
 
 
 # ================================
-# ðŸ§  AI ROUTING
+# Ã°Å¸Â§Â  AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
 # ================================
 def process_ai_detection():
     # 1. Take picture and get result from ai_vision module
@@ -42,10 +42,12 @@ def process_ai_detection():
 
     hardware.seq_lock.acquire()  # wait until servo finishes
     bin_levels = hardware.update_bin_levels()
+    print(f"[ACTION] sending data to dashboard")
     bin_levels['label'] = target_bin
     bin_levels['timestamp'] = int(time.time())
     mqtt_publisher.send_bin_levels(bin_levels)  # send via MQTT
     hardware.seq_lock.release()
+    print(f"[ACTION] sending data to dashboard")
 
     # 3. Unlock the event
     capture_event.clear()
@@ -88,8 +90,7 @@ def camera_capture():
 # ================================
 def handle_inference_result(result):
     print("[AI RESULT] Received:", result)
-
-    # Example: trigger servo movement based on AI result
+    result = "paper"
     if result.lower() == "plastic":
         Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
     elif result.lower() == "paper":
@@ -98,9 +99,19 @@ def handle_inference_result(result):
         Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
     else:
         print("[AI RESULT] Unknown label:", result)
-
+        return  # also add this so it doesn't try to send levels for unknown labels
+    
+    hardware.seq_lock.acquire()  # wait until servo finishes
+    print("[DEBUG] about to call update_bin_levels")
+    bin_levels = hardware.update_bin_levels()
+    print("[DEBUG] update_bin_levels returned")
+    bin_levels['label'] = result
+    bin_levels['timestamp'] = int(time()) 
+    mqtt_publisher.send_bin_levels(bin_levels) # send to dashboard via MQTT
+    hardware.seq_lock.release()
+    capture_event.clear()
 # ================================
-# ðŸ‘€ DISTANCE MONITOR
+# Ã°Å¸â€˜â‚¬ DISTANCE MONITOR
 # ================================
 def monitor_detection():
     """Continuously monitor the 'd' sensor and trigger AI."""
@@ -125,9 +136,10 @@ def monitor_detection():
         sleep(0.1)
 
 mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
+#mqtt_publisher.subscribe_results(process_ai_detection) # for local
 
 # ================================
-# ðŸš€ START SYSTEM
+# Ã°Å¸Å¡â‚¬ START SYSTEM
 # ================================
 if __name__ == "__main__":
     Thread(target=monitor_detection, daemon=True).start()

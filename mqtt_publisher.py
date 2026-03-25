@@ -1,7 +1,10 @@
 import paho.mqtt.client as mqtt
+import json
+
+from pi_2_main import STATUS_TOPIC
 
 # TO UPDATE IP ADDRESS IN pi_2_main.py AS WELL
-BROKER = "10.174.191.120"   # IP of your broker
+BROKER = "10.39.196.120"   # IP of your broker
 IMAGE_TOPIC = "smartbin/image"
 RESULT_TOPIC = "smartbin/result"
 
