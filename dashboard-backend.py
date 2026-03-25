@@ -1,52 +1,61 @@
-from flask import Flask, jsonify
-import paho.mqtt.client as mqtt
-import json
-import threading
-
+from flask import Flask, jsonify, request
 from flask_cors import CORS
+import boto3
 
 app = Flask(__name__)
 CORS(app)
 
-# For a single bin, just store the latest payload
+# Allow all hosts (fix 400 Bad Request)
+app.config['SERVER_NAME'] = None  # don't restrict host matching
+
 latest_bin_data = {}
+dynamodb = boto3.resource('dynamodb', region_name='us-east-1')
+table = dynamodb.Table('smartbin')
 
-# ------------------------------
-# MQTT Callback
-# ------------------------------
-def on_message(client, userdata, msg):
-    try:
-        data = json.loads(msg.payload.decode())
-        latest_bin_data.update(data)  # store/overwrite latest state
-        print(f"[MQTT] Receive update: {data}")
-    except Exception as e:
-        print("Error processing MQTT message:", e)
+@app.route("/bin", methods=["GET", "POST"])
+def bin_data():
+    global latest_bin_data
+    if request.method == "POST":
+        data = request.json
+        if not data:
+            return jsonify({"error": "No JSON payload received"}), 400
+        
+        latest_bin_data.update(data)
 
-# ------------------------------
-# MQTT Setup
-# ------------------------------
-def start_mqtt():
-    client = mqtt.Client()
-    # client.connect("10.174.191.241", 1883)  # to match BROKER IP !!
-    client.connect("10.39.196.120", 1883)  # to match BROKER IP !!
-    client.subscribe("smartbin/bin_levels")
-    client.on_message = on_message
-    client.loop_forever()
+        # Save to DynamoDB
+        table.put_item(Item={
+            'timestamp': data['timestamp'],
+            'a': str(data.get('a', 0)),
+            'b': str(data.get('b', 0)),
+            'c': str(data.get('c', 0)),
+            'label': data.get('label', '')
+        })
 
-threading.Thread(target=start_mqtt, daemon=True).start()
-
-# ------------------------------
-# API Endpoint
-# ------------------------------
-@app.route("/bin")
-def get_bin():
-    if latest_bin_data:
-        return jsonify(latest_bin_data)
+        return jsonify({"status": "success"}), 200
     else:
-        return jsonify({"message": "No data yet"}), 404
+        if latest_bin_data:
+            return jsonify(latest_bin_data)
+        else:
+            return jsonify({"message": "No data yet"}), 404
 
-# ------------------------------
-# Run Flask
-# ------------------------------
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+@app.route("/history", methods=["GET"])
+def get_history():
+    try:
+        response = table.scan()
+        items = response['Items']
+        
+        # Sort by timestamp descending (newest first)
+        items.sort(key=lambda x: int(x['timestamp']), reverse=True)
+        
+        return jsonify(items), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+def lambda_handler(event, context):
+    import awsgi
+    if 'requestContext' in event and 'http' in event['requestContext']:
+        # Translate v2 fields back to v1 so awsgi understands them
+        event['httpMethod'] = event['requestContext']['http']['method']
+        event['path'] = event['requestContext']['http']['path']
+        event['queryStringParameters'] = event.get('queryStringParameters', {})
+    return awsgi.response(app, event, context)
