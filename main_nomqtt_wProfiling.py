@@ -3,7 +3,6 @@ from threading import Thread, Event
 from signal import pause
 from time import sleep, time
 from profiler import profile_block, now, log_profile
-import cv2
 
 import config
 import hardware_wProfiling
