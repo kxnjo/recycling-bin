@@ -3,7 +3,7 @@ from time import sleep, time
 import sys
 
 import config
-import hardware_wProfiling
+import profiling.hardware_wProfiling as hardware_wProfiling
 import ai_vision
 from profiler import profile_block, now, log_profile
 

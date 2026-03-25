@@ -5,7 +5,7 @@ from ultralytics import YOLO
 import config
 import numpy as np
 
-print(f"Loading custom YOLO Classification model from {config.MODEL_PATH}...")
+# print(f"Loading custom YOLO Classification model from {config.MODEL_PATH}...")
 model = YOLO(config.MODEL_PATH)
 
 def capture_and_infer():
@@ -13,19 +13,19 @@ def capture_and_infer():
     cap = cv2.VideoCapture(0)
 
     if not cap.isOpened():
-        print("[ERROR] Could not open webcam")
+        # print("[ERROR] Could not open webcam")
         return "general" # fallback
 
     ret, frame = cap.read()
     cap.release()
 
     if not ret:
-        print("[ERROR] Failed to capture image")
+        # print("[ERROR] Failed to capture image")
         return "general" # fallback
 
     img_path = "capture.jpg"
     cv2.imwrite(img_path, frame)
-    print(f"\n[CAMERA] Image saved as {img_path}. Starting local inference...")
+    # print(f"\n[CAMERA] Image saved as {img_path}. Starting local inference...")
 
     # Grab the resolution from config
     res = config.INFERENCE_RES
@@ -49,10 +49,10 @@ def capture_and_infer():
         predicted_class = model.names[top1_index]  # Translate index to your custom class name
 
     # Clean benchmark-style output
-    print(f"\n{'Model':<15} {'Resolution':<12} {'Latency (ms)':<18} {'FPS':<8}")
-    print("-" * 65)
-    print(f"{'Custom YOLO-cls':<15} {f'{res[0]}x{res[1]}':<12} {latency_ms:<18.2f} {fps:<8.2f}\n")
-    print(f"Prediction: {predicted_class.upper()} (Confidence: {confidence:.1%})")
+    # print(f"\n{'Model':<15} {'Resolution':<12} {'Latency (ms)':<18} {'FPS':<8}")
+    # print("-" * 65)
+    # print(f"{'Custom YOLO-cls':<15} {f'{res[0]}x{res[1]}':<12} {latency_ms:<18.2f} {fps:<8.2f}\n")
+    # print(f"Prediction: {predicted_class.upper()} (Confidence: {confidence:.1%})")
 
     # --- DIRECT ROUTING LOGIC ---
     bin_choice = "general" 
@@ -64,7 +64,7 @@ def capture_and_infer():
         valid_bins = ["plastic", "paper", "general"]
         if primary_obj in valid_bins:
             bin_choice = primary_obj
-            print(f"[AI MATCH] Confirmed custom class: {bin_choice.upper()}")
+            # print(f"[AI MATCH] Confirmed custom class: {bin_choice.upper()}")
         else:
             print(f"[AI WARNING] Unknown class '{primary_obj}'. Defaulting to GENERAL.")
             
@@ -75,18 +75,18 @@ def capture_and_infer():
     return bin_choice
 
 def do_infer(image_bytes):
-    print(f"\n[AI VISION] Running inference on received image bytes...")
+    # print(f"\n[AI VISION] Running inference on received image bytes...")
     """runs Custom YOLO Classification, and returns the target bin category."""
     np_arr = np.frombuffer(image_bytes, np.uint8)
     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
     if frame is None:
-        print("[ERROR] Failed to decode image")
+        # print("[ERROR] Failed to decode image")
         return "general"  # fallback
 
     img_path = "capture.jpg"
     cv2.imwrite(img_path, frame)
-    print(f"\n[CAMERA] Image saved as {img_path}. Starting inference on Pi 2...")
+    # print(f"\n[CAMERA] Image saved as {img_path}. Starting inference on Pi 2...")
 
     # Grab the resolution from config
     res = config.INFERENCE_RES
@@ -110,10 +110,10 @@ def do_infer(image_bytes):
         predicted_class = model.names[top1_index]  # Translate index to your custom class name
 
     # Clean benchmark-style output
-    print(f"\n{'Model':<15} {'Resolution':<12} {'Latency (ms)':<18} {'FPS':<8}")
-    print("-" * 65)
-    print(f"{'Custom YOLO-cls':<15} {f'{res[0]}x{res[1]}':<12} {latency_ms:<18.2f} {fps:<8.2f}\n")
-    print(f"Prediction: {predicted_class.upper()} (Confidence: {confidence:.1%})")
+    # print(f"\n{'Model':<15} {'Resolution':<12} {'Latency (ms)':<18} {'FPS':<8}")
+    # print("-" * 65)
+    # print(f"{'Custom YOLO-cls':<15} {f'{res[0]}x{res[1]}':<12} {latency_ms:<18.2f} {fps:<8.2f}\n")
+    # print(f"Prediction: {predicted_class.upper()} (Confidence: {confidence:.1%})")
 
     # --- DIRECT ROUTING LOGIC ---
     bin_choice = "general" 
@@ -125,7 +125,7 @@ def do_infer(image_bytes):
         valid_bins = ["plastic", "paper", "general"]
         if primary_obj in valid_bins:
             bin_choice = primary_obj
-            print(f"[AI MATCH] Confirmed custom class: {bin_choice.upper()}")
+            # print(f"[AI MATCH] Confirmed custom class: {bin_choice.upper()}")
         else:
             print(f"[AI WARNING] Unknown class '{primary_obj}'. Defaulting to GENERAL.")
             
