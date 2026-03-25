@@ -10,6 +10,8 @@ import ai_vision
 # MQTT
 import mqtt_publisher
 capture_event = Event()
+# HTTP
+import requests
 
 # ================================
 # Ã°Å¸Å½Â¯ BUTTON ROUTING
@@ -86,11 +88,22 @@ def camera_capture():
     cap.release()
 
 # ================================
+# SEND HTTP REQUEST I THINK
+# ================================
+API_URL = "https://zoax1qwl2f.execute-api.us-east-1.amazonaws.com/bin"
+
+def send_bin_levels_http(bin_levels):
+    try:
+        response = requests.post(API_URL, json=bin_levels)
+        print(f"[HTTP] Sent bin levels, status: {response.status_code}")
+    except Exception as e:
+        print(f"[HTTP] Failed to send bin levels: {e}")
+# ================================
 # ACTION AFTER RECEIVING MQTT RESULT
 # ================================
 def handle_inference_result(result):
     print("[AI RESULT] Received:", result)
-    result = "paper"
+
     if result.lower() == "plastic":
         Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
     elif result.lower() == "paper":
@@ -100,14 +113,25 @@ def handle_inference_result(result):
     else:
         print("[AI RESULT] Unknown label:", result)
         return  # also add this so it doesn't try to send levels for unknown labels
+
+    # hardware.seq_lock.acquire()  # wait until servo finishes
+    # bin_levels = hardware.update_bin_levels()
+    # print(f"[ACTION] sending data to dashboard")
+    # bin_levels['label'] = result        # ? fixed
+    # bin_levels['timestamp'] = int(time())  # ? fixed
+    # mqtt_publisher.send_bin_levels(bin_levels)
+    # hardware.seq_lock.release()
+    # print(f"[ACTION] done sending data to dashboard")
+    # capture_event.clear()
     
     hardware.seq_lock.acquire()  # wait until servo finishes
     print("[DEBUG] about to call update_bin_levels")
     bin_levels = hardware.update_bin_levels()
     print("[DEBUG] update_bin_levels returned")
     bin_levels['label'] = result
-    bin_levels['timestamp'] = int(time()) 
-    mqtt_publisher.send_bin_levels(bin_levels) # send to dashboard via MQTT
+    bin_levels['timestamp'] = int(time())
+    #mqtt_publisher.send_bin_levels(bin_levels)
+    send_bin_levels_http(bin_levels)
     hardware.seq_lock.release()
     capture_event.clear()
 # ================================
