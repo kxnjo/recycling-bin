@@ -43,7 +43,7 @@ def process_ai_detection():
     hardware.seq_lock.acquire()  # wait until servo finishes
     bin_levels = hardware.update_bin_levels()
     bin_levels['label'] = target_bin
-    bin_levels['timestamp'] = int(time.time())
+    bin_levels['timestamp'] = int(time())
     hardware.seq_lock.release()
 
     # 4. Unlock the event
