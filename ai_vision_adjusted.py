@@ -40,7 +40,7 @@ def init_model():
             
             # 1. Build the "blank" architecture. 
             # Note: Change to mobilenet_v3_small if you trained on the small version!
-            model = models.mobilenet_v3_large(num_classes=len(MOBILENET_CLASSES))
+            model = models.mobilenet_v3_small(num_classes=len(MOBILENET_CLASSES))
             
             # 2. Load the dictionary of weights from your file
             state_dict = torch.load(config.MODEL_PATH, map_location=device)
