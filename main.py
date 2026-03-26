@@ -107,25 +107,27 @@ def camera_capture():
     inference_event.clear()
     inference_result["label"] = None
 
-    # ðŸ“¡ Send with QoS 1
-    mqtt_publisher.send_image(json.dumps(message), qos=1)
+    # # ðŸ“¡ Send with QoS 1
+    # mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    print("[WAIT] Waiting for Pi 2 result...")
-    start = time()
+    # print("[WAIT] Waiting for Pi 2 result...")
+    # start = time()
 
-    # â³ WAIT (timeout)
-    if inference_event.wait(timeout=0.2):
-        latency = time() - start
-        print(f"[SUCCESS] Result received in {latency:.2f}s")
-        result = inference_result["label"]
-    else:
-        print("[FALLBACK] Timeout â†’ running local AI")
-        ai_vision.init_model()
-        current_request_id = None
-        result = ai_vision.capture_and_infer()
+    # # â³ WAIT (timeout)
+    # if inference_event.wait(timeout=0.2):
+    #     latency = time() - start
+    #     print(f"[SUCCESS] Result received in {latency:.2f}s")
+    #     result = inference_result["label"]
+    # else:
+    #     print("[FALLBACK] Timeout â†’ running local AI")
+    #     ai_vision.init_model()
+    #     current_request_id = None
+    #     result = ai_vision.capture_and_infer()
 
-    # ðŸš€ Handle result
-    handle_final_result(result)
+    # # ðŸš€ Handle result
+    # handle_final_result(result)
+
+    send_image_cloud(image_bytes)
 # ================================
 # SEND HTTP REQUEST I THINK
 # ================================
@@ -137,6 +139,21 @@ def send_bin_levels_http(bin_levels):
         print(f"[HTTP] Sent bin levels, status: {response.status_code}")
     except Exception as e:
         print(f"[HTTP] Failed to send bin levels: {e}")
+
+CLOUD_MODEL_URL = "http://44.201.198.140:5000/infer"
+def send_image_cloud(image_bytes):
+    try:
+        response = requests.post(CLOUD_MODEL_URL, data=image_bytes)
+        if response.status_code == 200:
+            result = response.json().get("label")
+            print(f"[CLOUD] Received result: {result}")
+            return result
+        else:
+            print(f"[CLOUD] Inference failed with status: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"[CLOUD] Failed to send image: {e}")
+        return None
 # ================================
 # ACTION AFTER RECEIVING MQTT RESULT
 # ================================
