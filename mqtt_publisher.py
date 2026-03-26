@@ -11,6 +11,7 @@ RESULT_TOPIC = "smartbin/result"
 # Initialize client and connect
 client = mqtt.Client("SmartBin_Publisher")
 try:
+    # make sure IP is correct / matches whatever Pi is running
     client.connect(config.BROKER_IP, config.BROKER_PORT, 60)
 except Exception as e:
     print("\n[MQTT ERROR] ❌ Cannot connect to broker!")

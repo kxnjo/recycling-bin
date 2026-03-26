@@ -157,29 +157,7 @@ def send_image_cloud(image_bytes):
 # ================================
 # ACTION AFTER RECEIVING MQTT RESULT
 # ================================
-# def handle_inference_result(result):
-#     print("[AI RESULT] Received:", result)
 
-#     if result.lower() == "plastic":
-#         Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
-#     elif result.lower() == "paper":
-#         Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
-#     elif result.lower() == "general":
-#         Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
-#     else:
-#         print("[AI RESULT] Unknown label:", result)
-#         return  # also add this so it doesn't try to send levels for unknown labels
-
-#     hardware.seq_lock.acquire()  # wait until servo finishes
-#     print("[DEBUG] about to call update_bin_levels")
-#     bin_levels = hardware.update_bin_levels()
-#     print("[DEBUG] update_bin_levels returned")
-#     bin_levels['label'] = result
-#     bin_levels['timestamp'] = int(time())
-#     #mqtt_publisher.send_bin_levels(bin_levels)
-#     send_bin_levels_http(bin_levels)
-#     hardware.seq_lock.release()
-#     capture_event.clear()
 def handle_inference_result(msg):
     global inference_result
 
@@ -231,27 +209,149 @@ def handle_final_result(result):
 # ================================
 # ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â€šÂ¬ DISTANCE MONITOR
 # ================================
+ultra_history = []
+ULTRA_HISTORY_SIZE = 5
+
+def is_ultrasonic_healthy(distance):
+    if distance is None:
+        return False
+
+    if distance <= 0 or distance > 400:
+        return False
+
+    # Detect stuck sensor (same value repeated)
+    if len(ultra_history) >= ULTRA_HISTORY_SIZE:
+        if len(set(ultra_history[-ULTRA_HISTORY_SIZE:])) == 1:
+            return False
+
+    return True
+
+fallback_cap = None
+prev_frame = None
+
+def start_fallback_camera():
+    global fallback_cap
+    if fallback_cap is None:
+        print("[FALLBACK] Starting camera...")
+        fallback_cap = cv2.VideoCapture(0)
+
+def stop_fallback_camera():
+    global fallback_cap, prev_frame
+    if fallback_cap:
+        print("[FALLBACK] Stopping camera...")
+        fallback_cap.release()
+        fallback_cap = None
+    prev_frame = None
+def camera_detects_object():
+    global fallback_cap, prev_frame
+
+    if fallback_cap is None:
+        return False
+
+    ret, frame = fallback_cap.read()
+    if not ret:
+        return False
+
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
+    if prev_frame is None:
+        prev_frame = gray
+        return False
+
+    diff = cv2.absdiff(prev_frame, gray)
+    _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+
+    motion = thresh.sum()
+    prev_frame = gray
+
+    return motion > 300000  # tune this
+
+from enum import Enum
+
+class DetectState(Enum):
+    ULTRASONIC = 1
+    CAMERA_FALLBACK = 2
+
 def monitor_detection():
-    """Continuously monitor the 'd' sensor and trigger AI."""
     detect_sensor = hardware.sensors['d']
-    
+    state = DetectState.ULTRASONIC
+
+    global ultra_history
+
     while True:
-        if not hardware.seq_lock.locked() and not capture_event.is_set():
-            try:
-                distance = detect_sensor.distance * 100  # cm
-                if 0 < distance <= config.DETECT_THRESHOLD:
-                    print(f"\n[DETECT] Object detected at {round(distance, 1)} cm!")
-                    
-                    # Lock the capture event and spin up AI thread
-                    camera_capture()
-                    capture_event.clear()
-                    # Thread(target=camera_capture, daemon=True).start()
-                    
-                    sleep(2) # Cooldown
-            except Exception as e:
-                print(f"[ERROR] Sensor read failed: {e}")
-        
+        if hardware.seq_lock.locked() or capture_event.is_set():
+            sleep(0.1)
+            continue
+
+        distance = None
+
+        # =========================
+        # READ ULTRASONIC
+        # =========================
+        try:
+            distance = detect_sensor.distance * 100
+            ultra_history.append(round(distance, 1))
+            if len(ultra_history) > ULTRA_HISTORY_SIZE:
+                ultra_history.pop(0)
+        except Exception as e:
+            print(f"[ERROR] Sensor read failed: {e}")
+
+        healthy = is_ultrasonic_healthy(distance)
+
+        # =========================
+        # STATE: ULTRASONIC
+        # =========================
+        if state == DetectState.ULTRASONIC:
+            if not healthy:
+                print("[⚠️] Ultrasonic failed → switching to CAMERA fallback")
+                start_fallback_camera()
+                state = DetectState.CAMERA_FALLBACK
+                continue
+
+            if distance and 0 < distance <= config.DETECT_THRESHOLD:
+                print(f"\n[DETECT] Ultrasonic: {round(distance,1)} cm")
+                camera_capture()
+                sleep(2)
+
+        # =========================
+        # STATE: CAMERA FALLBACK
+        # =========================
+        elif state == DetectState.CAMERA_FALLBACK:
+            if camera_detects_object():
+                print("[📷] Fallback camera detected object!")
+                camera_capture()
+                sleep(2)
+
+            # Try recovery
+            if healthy:
+                print("[🔄] Ultrasonic recovering...")
+                stop_fallback_camera()
+                state = DetectState.ULTRASONIC
+
         sleep(0.1)
+        
+# def monitor_detection():
+#     """Continuously monitor the 'd' sensor and trigger AI."""
+#     detect_sensor = hardware.sensors['d']
+    
+#     while True:
+#         if not hardware.seq_lock.locked() and not capture_event.is_set():
+#             try:
+#                 distance = detect_sensor.distance * 100  # cm
+#                 if 0 < distance <= config.DETECT_THRESHOLD:
+#                     print(f"\n[DETECT] Object detected at {round(distance, 1)} cm!")
+                    
+#                     # Lock the capture event and spin up AI thread
+#                     camera_capture()
+#                     capture_event.clear()
+#                     # Thread(target=camera_capture, daemon=True).start()
+                    
+#                     sleep(2) # Cooldown
+#             except Exception as e:
+#                 print(f"[ERROR] Sensor read failed: {e}")
+        
+#         sleep(0.1)
 
 mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
 #mqtt_publisher.subscribe_results(process_ai_detection) # for local
