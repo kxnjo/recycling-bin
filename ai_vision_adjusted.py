@@ -47,10 +47,16 @@ def init_model():
 def _run_inference(frame):
     """Internal helper to run the active model and decode the prediction."""
     
+    # --- BULLETPROOF LAZY LOADING ---
     if model_type is None:
-        print("[AI CRITICAL ERROR] No AI engine loaded! Check if config.MODEL_PATH contains 'yolo' or 'mobilenet'.")
-        return "general" 
-    # ------------------------------------------------
+        print("[AI INFO] AI engine wasn't loaded yet! Auto-loading now...")
+        init_model() # Force the model to load right now
+        
+        # If it is STILL None after trying to load, the config path is definitely wrong.
+        if model_type is None:
+            print(f"[AI CRITICAL ERROR] Path '{config.MODEL_PATH}' must contain the word 'yolo' or 'mobilenet'!")
+            return "general" 
+    # --------------------------------
 
     predicted_class = "None"
     confidence = 0.0
