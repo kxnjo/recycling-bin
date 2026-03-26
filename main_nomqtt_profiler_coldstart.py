@@ -5,7 +5,7 @@ import sys
 import config
 # If your file really lives in profiling/hardware_wProfiling.py, switch this import back.
 import hardware_wProfiling_robustReading as hardware_wProfiling
-import ai_codeCarbon as ai_vision
+import ai_vision as ai_vision
 from profiler import log_profile, now, profile_block
 
 capture_event = Event()
