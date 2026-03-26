@@ -161,7 +161,7 @@ def run_sequence(target_angle):
 
     try:
         with profile_block("servo_sequence_total", extra={"target": target_angle}):
-            move_servo()
+            move_servo(target_angle)
 
         return True
     finally:
