@@ -1,6 +1,7 @@
 import statistics
 from threading import Lock
-from time import sleep, time
+from time import sleep
+import time
 
 from gpiozero import AngularServo, Button, DistanceSensor
 
