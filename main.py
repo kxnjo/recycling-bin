@@ -2,6 +2,7 @@
 from threading import Thread, Event
 from signal import pause
 from time import sleep, time
+from unittest import result
 import cv2
 
 import config
@@ -72,19 +73,21 @@ def camera_capture():
     print("[CAMERA] Capturing image...")
     capture_event.set()
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("[ERROR] Could not open webcam")
-        capture_event.clear()
-        return
+    # cap = cv2.VideoCapture(0)
+    # if not cap.isOpened():
+    #     print("[ERROR] Could not open webcam")
+    #     capture_event.clear()
+    #     return
 
-    ret, frame = cap.read()
-    cap.release()
+    # ret, frame = cap.read()
+    # cap.release()
+    ret, frame = get_frame()
 
     if not ret:
-        print("[ERROR] Failed to capture image")
+        print("[ERROR] Could not capture frame")
         capture_event.clear()
         return
+
 
     # Encode image
     success, buffer = cv2.imencode('.jpg', frame)
@@ -126,8 +129,44 @@ def camera_capture():
 
     # # ðŸš€ Handle result
     # handle_final_result(result)
+    # Send with QoS 1
+    start = time()
+    result = None
 
-    send_image_cloud(image_bytes)
+    # =========================
+    # 1. MQTT Inference (Pi 2)
+    # =========================
+    mqtt_publisher.send_image(json.dumps(message), qos=1)
+
+    if inference_event.wait(timeout=0.2): # if too slow , do local inference
+        latency = time() - start
+        print(f"[SUCCESS] Result received in {latency:.2f}s")
+        result = inference_result["label"]
+
+    # =========================
+    # 2. Local AI fallback (Pi 1)
+    # =========================
+    else:
+        try:
+            print("[FALLBACK] Timeout → running local AI")
+            ai_vision.init_model()
+            current_request_id = None
+            result = ai_vision.capture_and_infer()
+
+        # =========================
+        # 3. Cloud fallback
+        # =========================
+        except Exception as e:
+            print(f"[FALLBACK] Local AI failed: {e}")
+            print("[FALLBACK] Trying cloud inference...")
+            result = send_image_cloud(image_bytes)
+
+    # Once we have a result, 
+    if result is not None:
+        handle_final_result(result)
+    else:
+        print("[ERROR] All inference methods failed")
+
 # ================================
 # SEND HTTP REQUEST I THINK
 # ================================
@@ -154,6 +193,7 @@ def send_image_cloud(image_bytes):
     except Exception as e:
         print(f"[CLOUD] Failed to send image: {e}")
         return None
+
 # ================================
 # ACTION AFTER RECEIVING MQTT RESULT
 # ================================
@@ -229,6 +269,26 @@ def is_ultrasonic_healthy(distance):
 fallback_cap = None
 prev_frame = None
 
+def get_frame():
+    global fallback_cap
+
+    # Use fallback camera if already started
+    if fallback_cap is not None:
+        cap = fallback_cap
+    else:
+        cap = cv2.VideoCapture(0)
+
+    if not cap.isOpened():
+        print("[ERROR] Camera not available")
+        return False, None
+
+    ret, frame = cap.read()
+
+    if fallback_cap is None:
+        cap.release()
+
+    return ret, frame
+
 def start_fallback_camera():
     global fallback_cap
     if fallback_cap is None:
@@ -248,7 +308,8 @@ def camera_detects_object():
     if fallback_cap is None:
         return False
 
-    ret, frame = fallback_cap.read()
+    # ret, frame = fallback_cap.read()
+    ret, frame = get_frame()
     if not ret:
         return False
 
@@ -330,7 +391,7 @@ def monitor_detection():
                 state = DetectState.ULTRASONIC
 
         sleep(0.1)
-        
+
 # def monitor_detection():
 #     """Continuously monitor the 'd' sensor and trigger AI."""
 #     detect_sensor = hardware.sensors['d']
