@@ -43,37 +43,38 @@ servo2.angle = config.FS90_HOME
 
 def get_robust_reading(sensor_key):
     """
-    Tries to get a clean reading by giving the sensor 'breathing room'.
+    Tries to get a clean reading. 
+    If the sensor is dead, returns None instead of crashing.
     """
     sensor = sensors[sensor_key]
-    # Reduce the max_distance to force the internal gpiozero loop 
-    # to timeout faster if no echo is heard.
     sensor.max_distance = 1.5 
-    
     readings = []
     
-    # 1. 'Sacrificial Ping' - wake up the sensor/rail and ignore the result
+    # 1. 'Sacrificial Ping'
     try:
         _ = sensor.distance
-    except:
-        pass
-    time.sleep(0.1) # Recovery time after the wake-up
+    except Exception:
+        pass 
+    time.sleep(0.1)
 
     # 2. Actual Sampling Loop
-    for _ in range(5):
+    for i in range(5):
+        # We can even profile individual pings if you need that level of detail
         try:
-            # We use a very short internal timeout check
             val = sensor.distance * 100
             if 2.0 <= val <= 100.0:
                 readings.append(val)
-        except Exception:
-            # If the sensor hangs or errors, we just move to the next sample
-            pass
+        except Exception as e:
+            # Log the error but don't stop the loop
+            print(f"  [DEBUG] Ping {i} failed on {sensor_key}: {e}")
         
-        # INCREASED SLEEP: Give the 5V rail 100ms to recover between pings
         time.sleep(0.1) 
             
-    return round(statistics.median(readings), 2) if readings else None
+    # CRITICAL: Check if we actually got data before calculating median
+    if not readings:
+        return None
+        
+    return round(statistics.median(readings), 2)
 
 def get_single_bin_median(key):
     """Helper to sample a specific sensor 5 times and return median."""
@@ -99,27 +100,31 @@ def update_bin_levels():
 
     with profile_block("bin_level_scan_total"):
         for key in ["a", "b", "c"]:
-            # Perform the robust reading
-            results[key] = get_robust_reading(key)
+            # We wrap each individual sensor attempt so one failure doesn't 
+            # break the entire 'bin_level_scan_total' block.
+            try:
+                results[key] = get_robust_reading(key)
+            except Exception as e:
+                print(f"❌ Critical error profiling Bin {key}: {e}")
+                results[key] = None
             
             label = config.BIN_CONFIGS[key]["label"]
-            print(f"  - Bin {key.upper()} ({label}): {results[key]} cm")
+            status = f"{results[key]} cm" if results[key] is not None else "OFFLINE"
+            print(f"  - Bin {key.upper()} ({label}): {status}")
             
-            # BIGGER SETTLE DELAY: This is key for software-only power management.
-            # We wait 0.3s before moving to the NEXT physical sensor.
             with profile_block(f"bin_{key}_settle_delay"):
                 time.sleep(0.3) 
 
         # --- SECOND PASS: Targeted Retry ---
         failed_bins = [k for k, v in results.items() if v is None]
         if failed_bins:
-            print(f"⚠️ Power/Signal dip detected. Retrying: {', '.join(failed_bins).upper()}")
-            # Extra long wait before retries to let the Pi's power management stabilize
+            print(f"⚠️ Retrying failed sensors: {', '.join(failed_bins).upper()}")
             time.sleep(0.5) 
             for key in failed_bins:
-                results[key] = get_robust_reading(key)
-                print(f"  - Retry Bin {key.upper()}: {results[key]} cm")
-                time.sleep(0.2)
+                with profile_block(f"retry_bin_{key}"): # Added profiling for retries
+                    results[key] = get_robust_reading(key)
+                    print(f"  - Retry Bin {key.upper()}: {results[key]}")
+                    time.sleep(0.2)
 
     return results
 
