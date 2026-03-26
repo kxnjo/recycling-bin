@@ -24,7 +24,7 @@ CAMERA_HEIGHT = getattr(config, "CAMERA_HEIGHT", 224)
 CAMERA_FPS = getattr(config, "CAMERA_FPS", 30)
 CAMERA_BUFFERSIZE = getattr(config, "CAMERA_BUFFERSIZE", 1)
 CAMERA_WARMUP_GRABS = getattr(config, "CAMERA_WARMUP_GRABS", 2)
-CAMERA_IDLE_TIMEOUT = getattr(config, "CAMERA_IDLE_TIMEOUT", 8.0)  # seconds; set 0 to never auto-release
+CAMERA_IDLE_TIMEOUT = getattr(config, "CAMERA_IDLE_TIMEOUT", 15.0)  # seconds; set 0 to never auto-release
 
 # Global Model State
 model = None
