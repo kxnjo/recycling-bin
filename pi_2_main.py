@@ -3,9 +3,7 @@ import cv2
 import numpy as np
 import json
 import ai_vision
-# TO UPDATE IP ADDRESS IN mqtt_publisher.py AS WELL
-# BROKER = "10.174.191.120"
-BROKER = "10.39.196.120"  # for local testing
+import config
 
 IMAGE_TOPIC = "smartbin/image"
 ACK_TOPIC = "smartbin/image_ack"
@@ -37,7 +35,7 @@ def on_message(client, userdata, msg):
 
 client.on_message = on_message
 
-client.connect(BROKER, 1883)
+client.connect(config.BROKER_IP, config.BROKER_PORT)
 client.loop_start()
 
 # Publish "alive" after connecting (retain=True)
