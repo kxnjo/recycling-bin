@@ -4,7 +4,7 @@ import sys
 
 import config
 import hardware_wProfiling_robustReading as hardware_wProfiling
-import ai_vision as ai_vision
+import ai_vision_delayedClose as ai_vision
 from profiler import log_profile, now, profile_block
 
 capture_event = Event()
