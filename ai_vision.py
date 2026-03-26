@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 import config
-from profiler_adjusted import profile_block
+from profiler import profile_block
 
 # AI Engines
 from ultralytics import YOLO

@@ -2,11 +2,11 @@ from threading import Event, Thread
 from time import sleep, time
 import sys
 
-import config
+import config, cProfile, pstats, io
 # If your file really lives in profiling/hardware_wProfiling.py, switch this import back.
-import hardware_wProfiling_adjusted as hardware_wProfiling
+import hardware_wProfiling as hardware_wProfiling
 import ai_vision as ai_vision
-from profiler_adjusted import log_profile, now, profile_block
+from profiler import log_profile, now, profile_block
 
 capture_event = Event()
 run_once_completed = Event()
@@ -24,11 +24,15 @@ hardware_wProfiling.button3.when_pressed = lambda: handle_button_press(hardware_
 
 
 def process_ai_detection():
+    # 1. Initialize and start the C-Profiler for this thread
+    pr = cProfile.Profile()
+    pr.enable()
+
     global last_detected_at
     pipeline_start = now()
 
     try:
-        # AI stage total. The ai_vision module now also breaks this into smaller sub-stages.
+        # AI stage total.
         with profile_block("ai_capture_and_infer"):
             target_bin = ai_vision.capture_and_infer()
 
@@ -57,7 +61,6 @@ def process_ai_detection():
         with profile_block("servo_thread_start", extra={"label": target_bin, "target": target_angle}):
             servo_thread.start()
 
-        # This is the cleanest wait measurement for your current design.
         with profile_block("wait_for_servo_finish", extra={"label": target_bin}):
             servo_thread.join()
 
@@ -78,6 +81,19 @@ def process_ai_detection():
     finally:
         capture_event.clear()
         run_once_completed.set()
+        
+        # 2. Stop the profiler and print the formatted results
+        pr.disable()
+        s = io.StringIO()
+        # Sort by 'cumulative' time to see which functions took the longest from start to finish
+        ps = pstats.Stats(pr, stream=s).sort_stats('cumulative')
+        
+        print("\n" + "="*50)
+        print(" cProfile Results: AI Thread Bottlenecks")
+        print("="*50)
+        ps.print_stats(30) # Print the top 30 most time-consuming function calls
+        print(s.getvalue())
+        print("="*50 + "\n")
 
 
 def monitor_detection_once():
