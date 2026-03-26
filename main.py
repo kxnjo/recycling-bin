@@ -73,21 +73,12 @@ def camera_capture():
     print("[CAMERA] Capturing image...")
     capture_event.set()
 
-    # cap = cv2.VideoCapture(0)
-    # if not cap.isOpened():
-    #     print("[ERROR] Could not open webcam")
-    #     capture_event.clear()
-    #     return
-
-    # ret, frame = cap.read()
-    # cap.release()
     ret, frame = get_frame()
 
     if not ret:
         print("[ERROR] Could not capture frame")
         capture_event.clear()
         return
-
 
     # Encode image
     success, buffer = cv2.imencode('.jpg', frame)
@@ -110,26 +101,6 @@ def camera_capture():
     inference_event.clear()
     inference_result["label"] = None
 
-    # # ðŸ“¡ Send with QoS 1
-    # mqtt_publisher.send_image(json.dumps(message), qos=1)
-
-    # print("[WAIT] Waiting for Pi 2 result...")
-    # start = time()
-
-    # # â³ WAIT (timeout)
-    # if inference_event.wait(timeout=0.2):
-    #     latency = time() - start
-    #     print(f"[SUCCESS] Result received in {latency:.2f}s")
-    #     result = inference_result["label"]
-    # else:
-    #     print("[FALLBACK] Timeout â†’ running local AI")
-    #     ai_vision.init_model()
-    #     current_request_id = None
-    #     result = ai_vision.capture_and_infer()
-
-    # # ðŸš€ Handle result
-    # handle_final_result(result)
-    # Send with QoS 1
     start = time()
     result = None
 
@@ -175,9 +146,59 @@ API_URL = "https://zoax1qwl2f.execute-api.us-east-1.amazonaws.com/bin"
 def send_bin_levels_http(bin_levels):
     try:
         response = requests.post(API_URL, json=bin_levels)
-        print(f"[HTTP] Sent bin levels, status: {response.status_code}")
+        if response.status_code == 200:
+            print(f"[HTTP] Sent bin levels, status: {response.status_code}")
+        else:
+            print(f"[HTTP] Failed to send bin levels, status: {response.status_code}")
+            save_to_local_log(bin_levels)
     except Exception as e:
-        print(f"[HTTP] Failed to send bin levels: {e}")
+        print(f"[HTTP] Failed: {e}")
+        save_to_local_log(bin_levels)
+
+
+LOG_FILE = "offline_bin_logs.jsonl"
+
+def save_to_local_log(data):
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(json.dumps(data) + "\n")
+        print("[LOG] Saved data locally")
+    except Exception as e:
+        print(f"[LOG ERROR] Could not write to file: {e}")
+
+BATCH_SIZE = 10
+
+def resend_offline_logs():
+    try:
+        with open(LOG_FILE, "r") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return
+
+    remaining_lines = []
+
+    # Process in batches
+    for i in range(0, len(lines), BATCH_SIZE):
+        batch = lines[i:i+BATCH_SIZE]
+        data_batch = [json.loads(line) for line in batch]
+
+        try:
+            response = requests.post(API_URL + "/batch", json=data_batch, timeout=3)
+
+            if response.status_code == 200:
+                print(f"[RETRY] Sent batch of {len(batch)} logs")
+            else:
+                print("[RETRY] Batch failed")
+                remaining_lines.extend(batch)
+
+        except:
+            print("[RETRY] Network error, keeping batch")
+            remaining_lines.extend(batch)
+
+    # Rewrite file with failed logs only
+    with open(LOG_FILE, "w") as f:
+        f.writelines(remaining_lines)
+    
 
 CLOUD_MODEL_URL = "http://44.201.198.140:5000/infer"
 def send_image_cloud(image_bytes):
@@ -301,6 +322,7 @@ def stop_fallback_camera():
         fallback_cap.release()
         fallback_cap = None
     prev_frame = None
+
 def camera_detects_object():
     global fallback_cap, prev_frame
 
@@ -338,10 +360,14 @@ def monitor_detection():
     detect_sensor = hardware.sensors['d']
     state = DetectState.ULTRASONIC
     fail_count = 0
-
+    last_retry_time = 0
     global ultra_history
 
     while True:
+        if time() - last_retry_time > 10:
+            resend_offline_logs() # attempt to send any failed logs every 10 seconds
+            last_retry_time = time()
+
         if hardware.seq_lock.locked() or capture_event.is_set():
             sleep(0.1)
             continue
