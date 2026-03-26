@@ -334,9 +334,11 @@ class DetectState(Enum):
     ULTRASONIC = 1
     CAMERA_FALLBACK = 2
 
+ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger fallback
 def monitor_detection():
     detect_sensor = hardware.sensors['d']
     state = DetectState.ULTRASONIC
+    fail_count = 0
 
     global ultra_history
 
@@ -365,15 +367,20 @@ def monitor_detection():
         # =========================
         if state == DetectState.ULTRASONIC:
             if not healthy:
-                print("[⚠️] Ultrasonic failed → switching to CAMERA fallback")
-                start_fallback_camera()
-                state = DetectState.CAMERA_FALLBACK
-                continue
+                fail_count += 1
+                print(f"[⚠️] Ultrasonic unhealthy ({fail_count}/{ULTRASONIC_FAIL_THRESHOLD})")
+                if fail_count >= ULTRASONIC_FAIL_THRESHOLD:
+                    print("[⚠️] Confirmed failure → switching to CAMERA fallback")
+                    start_fallback_camera()
+                    state = DetectState.CAMERA_FALLBACK
+                    fail_count = 0
+            else:
+                fail_count = 0  # reset on any good reading
 
-            if distance and 0 < distance <= config.DETECT_THRESHOLD:
-                print(f"\n[DETECT] Ultrasonic: {round(distance,1)} cm")
-                camera_capture()
-                sleep(2)
+                if distance and 0 < distance <= config.DETECT_THRESHOLD:
+                    print(f"\n[DETECT] Ultrasonic: {round(distance,1)} cm")
+                    camera_capture()
+                    sleep(2)
 
         # =========================
         # STATE: CAMERA FALLBACK
@@ -389,6 +396,7 @@ def monitor_detection():
                 print("[🔄] Ultrasonic recovering...")
                 stop_fallback_camera()
                 state = DetectState.ULTRASONIC
+                fail_count = 0
 
         sleep(0.1)
 
