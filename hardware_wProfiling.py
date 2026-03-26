@@ -41,34 +41,48 @@ servo.angle = config.MAIN_HOME
 servo2.angle = config.FS90_HOME
 
 
+def get_single_bin_median(key):
+    """Helper to sample a specific sensor 5 times and return median."""
+    readings = []
+    sensor = sensors[key]
+    
+    with profile_block(f"bin_{key}_sample_loop"):
+        for _ in range(5):
+            try:
+                val = sensor.distance * 100
+                # Filters out negative or out-of-range values
+                if 2.0 <= val <= 100.0:
+                    readings.append(val)
+            except Exception:
+                pass
+            sleep(0.06)
+            
+    return round(statistics.median(readings), 2) if readings else None
+
 def update_bin_levels():
-    """Sequentially sample all three bins and return median distances in cm."""
     print("📊 Measuring bin fill levels...")
     results = {}
 
     with profile_block("bin_level_scan_total"):
+        # --- FIRST PASS: Sequential run for all bins ---
         for key in ["a", "b", "c"]:
-            readings = []
-            sensor = sensors[key]
-
-            with profile_block(f"bin_{key}_sample_loop"):
-                for _ in range(5):
-                    try:
-                        val = sensor.distance * 100
-                        if 2.0 <= val <= 100.0:
-                            readings.append(val)
-                    except Exception:
-                        pass
-                    sleep(0.06)
-
-            median_val = round(statistics.median(readings), 2) if readings else None
-            results[key] = median_val
+            results[key] = get_single_bin_median(key)
+            
             label = config.BIN_CONFIGS[key]["label"]
-            print(f"  - Bin {key.upper()} ({label}): {median_val} cm")
-
-            # Keep this separate so you can see how much time is just the settle delay.
+            print(f"  - Bin {key.upper()} ({label}): {results[key]} cm")
+            
             with profile_block(f"bin_{key}_settle_delay"):
                 sleep(0.1)
+
+        # --- SECOND PASS: Retry only the failures ---
+        failed_bins = [k for k, v in results.items() if v is None]
+        
+        if failed_bins:
+            print(f"⚠️ Retrying failed sensors: {', '.join(failed_bins).upper()}...")
+            for key in failed_bins:
+                results[key] = get_single_bin_median(key)
+                print(f"  - Retry Bin {key.upper()}: {results[key]} cm")
+                sleep(0.1) # Final settle delay for the retry
 
     return results
 
