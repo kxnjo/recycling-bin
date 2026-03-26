@@ -7,7 +7,7 @@ from profiler_adjusted import profile_block
 # AI Engines
 from ultralytics import YOLO
 import torch
-from torchvision import transforms
+from torchvision import transforms, models
 from PIL import Image
 
 # Global Settings
@@ -37,8 +37,20 @@ def init_model():
         elif "mobilenet" in path_lower:
             model_type = "mobilenet"
             print(f"Loading MobileNetV3 model from {config.MODEL_PATH}...")
-            model = torch.load(config.MODEL_PATH, map_location=device)
-            model.eval() # Important: Set PyTorch to evaluation mode
+            
+            # 1. Build the "blank" architecture. 
+            # Note: Change to mobilenet_v3_small if you trained on the small version!
+            model = models.mobilenet_v3_large(num_classes=len(MOBILENET_CLASSES))
+            
+            # 2. Load the dictionary of weights from your file
+            state_dict = torch.load(config.MODEL_PATH, map_location=device)
+            
+            # 3. Pour the weights into the blank model
+            model.load_state_dict(state_dict)
+            
+            # 4. Push to GPU/CPU and set to evaluation mode
+            model = model.to(device)
+            model.eval() 
             
         else:
             print(f"[ERROR] Unknown model type in path: {config.MODEL_PATH}")
