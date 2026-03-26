@@ -11,7 +11,7 @@ capture_event = Event()
 run_once_completed = Event()
 last_detected_at = None
 
-NUM_RUNS = 5
+NUM_RUNS = 10
 WAIT_BETWEEN_RUNS = 2.0   # seconds between attempts
 WAIT_FOR_OBJECT_REMOVAL = True
 
