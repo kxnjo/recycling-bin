@@ -3,6 +3,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
+from functools import wraps
 
 PROFILE_LOG = "profile_log.csv"
 
