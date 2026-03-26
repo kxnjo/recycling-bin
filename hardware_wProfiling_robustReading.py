@@ -98,7 +98,7 @@ def update_bin_levels():
     results = {}
 
     with profile_block("bin_level_scan_total"):
-        for key in ["a", "b", "c"]:
+        for key in ["c", "b", "a"]:
             # Perform the robust reading
             results[key] = get_robust_reading(key)
             
