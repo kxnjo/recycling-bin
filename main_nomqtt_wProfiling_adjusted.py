@@ -5,7 +5,7 @@ import sys
 import config
 # If your file really lives in profiling/hardware_wProfiling.py, switch this import back.
 import hardware_wProfiling_adjusted as hardware_wProfiling
-import ai_vision_adjusted as ai_vision
+import ai_vision as ai_vision
 from profiler_adjusted import log_profile, now, profile_block
 
 capture_event = Event()
