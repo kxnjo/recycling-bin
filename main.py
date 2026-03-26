@@ -151,8 +151,8 @@ def camera_capture():
             print("[FALLBACK] Timeout → running local AI")
             ai_vision.init_model()
             current_request_id = None
-            result = ai_vision.capture_and_infer()
-
+            # result = ai_vision.capture_and_infer()
+            result = ai_vision.infer_frame(frame)
         # =========================
         # 3. Cloud fallback
         # =========================
