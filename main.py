@@ -255,15 +255,14 @@ ULTRA_HISTORY_SIZE = 5
 def is_ultrasonic_healthy(distance):
     if distance is None:
         return False
-
     if distance <= 0 or distance > 400:
         return False
-
-    # Detect stuck sensor (same value repeated)
+    # Only flag as stuck if repeating an invalid-looking value
     if len(ultra_history) >= ULTRA_HISTORY_SIZE:
         if len(set(ultra_history[-ULTRA_HISTORY_SIZE:])) == 1:
-            return False
-
+            stuck_val = ultra_history[-1]
+            if stuck_val <= 0 or stuck_val >= 400:  # only flag boundary values
+                return False
     return True
 
 fallback_cap = None
