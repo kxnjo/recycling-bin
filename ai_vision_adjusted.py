@@ -46,6 +46,12 @@ def init_model():
 
 def _run_inference(frame):
     """Internal helper to run the active model and decode the prediction."""
+    
+    if model_type is None:
+        print("[AI CRITICAL ERROR] No AI engine loaded! Check config.MODEL_PATH.")
+        return "general" # Safely drop the item in general waste without crashing
+    # -----------------------------
+
     predicted_class = "None"
     confidence = 0.0
 
