@@ -2,7 +2,7 @@ from threading import Event, Thread
 from time import sleep, time
 import sys
 
-from ..profiling import config
+import config
 # If your file really lives in profiling/hardware_wProfiling.py, switch this import back.
 import hardware_wProfiling_adjusted as hardware_wProfiling
 import ai_vision_adjusted as ai_vision
