@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 import config
-from profiler import profile_block
+from profiler import profile_block, profile_cpu
 
 # AI Engines
 from ultralytics import YOLO
@@ -125,6 +125,7 @@ def _run_inference(frame):
     return bin_choice
 
 
+@profile_cpu
 def capture_and_infer():
     """Capture one frame locally and run classification on the frame directly."""
     with profile_block("camera_open"):

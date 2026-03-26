@@ -6,7 +6,7 @@ import time
 from gpiozero import AngularServo, Button, DistanceSensor
 
 import config
-from profiler import profile_block
+from profiler import profile_block, profile_cpu
 
 # Lock prevents re-triggering while busy.
 seq_lock = Lock()
@@ -94,6 +94,7 @@ def get_single_bin_median(key):
             
     return round(statistics.median(readings), 2) if readings else None
 
+@profile_cpu
 def update_bin_levels():
     print("📊 Measuring bin fill levels...")
     results = {}
@@ -129,6 +130,29 @@ def update_bin_levels():
     return results
 
 
+@profile_cpu
+def move_servo(target_angle):
+    with profile_block("servo_main_move", extra={"target": target_angle}):
+        print(f"Moving main servo to {target_angle}")
+        servo.angle = target_angle
+        sleep(0.8)
+
+    with profile_block("lid_open"):
+        print("Opening lid")
+        servo2.angle = config.FS90_TARGET
+        sleep(2.0)
+
+    with profile_block("lid_close"):
+        print("Closing lid")
+        servo2.angle = config.FS90_HOME
+        sleep(0.5)
+
+    with profile_block("servo_return_home"):
+        print("Returning home...")
+        servo.angle = config.MAIN_HOME
+        sleep(1.0)
+
+
 def run_sequence(target_angle):
     """Run one complete servo sequence. Returns immediately if already busy."""
     if not seq_lock.acquire(blocking=False):
@@ -137,25 +161,7 @@ def run_sequence(target_angle):
 
     try:
         with profile_block("servo_sequence_total", extra={"target": target_angle}):
-            with profile_block("servo_main_move", extra={"target": target_angle}):
-                print(f"Moving main servo to {target_angle}")
-                servo.angle = target_angle
-                sleep(0.8)
-
-            with profile_block("lid_open"):
-                print("Opening lid")
-                servo2.angle = config.FS90_TARGET
-                sleep(2.0)
-
-            with profile_block("lid_close"):
-                print("Closing lid")
-                servo2.angle = config.FS90_HOME
-                sleep(0.5)
-
-            with profile_block("servo_return_home"):
-                print("Returning home...")
-                servo.angle = config.MAIN_HOME
-                sleep(1.0)
+            move_servo()
 
         return True
     finally:

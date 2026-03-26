@@ -19,6 +19,25 @@ def _stringify_extra(extra):
     return str(extra)
 
 
+def profile_cpu(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        cpu_start = time.process_time()
+        wall_start = time.perf_counter()
+
+        result = func(*args, **kwargs)
+
+        cpu_end = time.process_time()
+        wall_end = time.perf_counter()
+
+        cpu_ms = (cpu_end - cpu_start) * 1000
+        wall_ms = (wall_end - wall_start) * 1000
+
+        print(f"[CPU] {func.__name__}: {cpu_ms:.2f} ms CPU, {wall_ms:.2f} ms wall")
+        return result
+    return wrapper
+
+
 def log_profile(stage, duration_ms, extra=None):
     file_exists = os.path.exists(PROFILE_LOG)
     row = [
