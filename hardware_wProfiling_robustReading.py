@@ -41,39 +41,90 @@ servo2 = AngularServo(
 servo.angle = config.MAIN_HOME
 servo2.angle = config.FS90_HOME
 
-def get_robust_reading(sensor_key):
+# 1. Global State to track history
+# 'val' stores the last successful cm, 'ts' stores the unix timestamp
+BIN_STATE = {
+    "a": {"val": 20.0, "ts": 0}, # Default starting values
+    "b": {"val": 20.0, "ts": 0},
+    "c": {"val": 20.0, "ts": 0}
+}
+
+def get_robust_reading(key):
     """
-    Tries to get a clean reading by giving the sensor 'breathing room'.
+    Attempts to read a sensor. If it fails, it retries. 
+    If it still fails, it returns the Last Known Good value.
     """
-    sensor = sensors[sensor_key]
-    # Reduce the max_distance to force the internal gpiozero loop 
-    # to timeout faster if no echo is heard.
-    sensor.max_distance = 1.5 
-    
+    cfg = config.BIN_CONFIGS[key]
     readings = []
     
-    # 1. 'Sacrificial Ping' - wake up the sensor/rail and ignore the result
-    try:
-        _ = sensor.distance
-    except:
-        pass
-    time.sleep(0.1) # Recovery time after the wake-up
-
-    # 2. Actual Sampling Loop
-    for _ in range(5):
+    # --- PHASE 1: The 'Deep Scan' ---
+    # We try up to 2 full 'attempts' (opening and closing the sensor)
+    for attempt in range(2):
+        temp_sensor = None
         try:
-            # We use a very short internal timeout check
-            val = sensor.distance * 100
-            if 2.0 <= val <= 100.0:
-                readings.append(val)
-        except Exception:
-            # If the sensor hangs or errors, we just move to the next sample
-            pass
-        
-        # INCREASED SLEEP: Give the 5V rail 100ms to recover between pings
-        time.sleep(0.1) 
+            # Re-initialize to clear any 'stuck' GPIO states
+            temp_sensor = DistanceSensor(
+                echo=cfg["echo"], 
+                trigger=cfg["trigger"], 
+                max_distance=1.5  # Prevents infinite hangs
+            )
             
-    return round(statistics.median(readings), 2) if readings else None
+            time.sleep(0.1) # Stabilization wait
+            
+            for _ in range(8): # Increase samples for better hit rate
+                try:
+                    val = temp_sensor.distance * 100
+                    if 2.0 <= val <= 100.0:
+                        readings.append(val)
+                except Exception:
+                    pass
+                time.sleep(0.05)
+            
+            if readings:
+                break # We got data! Exit the attempt loop.
+                
+        finally:
+            if temp_sensor:
+                temp_sensor.close() # Clean up pins immediately
+        
+        if not readings:
+            print(f"  [RETRY] Bin {key.upper()} failed attempt {attempt+1}. Recovering...")
+            time.sleep(0.2) # Longer rest before next attempt
+
+    # --- PHASE 2: Fallback Logic ---
+    if readings:
+        median_val = round(statistics.median(readings), 2)
+        # Update our 'Memory'
+        BIN_STATE[key]["val"] = median_val
+        BIN_STATE[key]["ts"] = time.time()
+        return median_val, "LIVE"
+    else:
+        # RETURN THE FALLBACK
+        last_val = BIN_STATE[key]["val"]
+        last_ts = BIN_STATE[key]["ts"]
+        age = round(time.time() - last_ts, 1) if last_ts > 0 else "∞"
+        print(f"  ⚠️ Bin {key.upper()} FAILURE. Using fallback: {last_val}cm ({age}s ago)")
+        return last_val, "STALE"
+
+def update_bin_levels():
+    print("📊 Measuring bin fill levels...")
+    results = {}
+
+    with profile_block("bin_level_scan_total"):
+        for key in ["a", "b", "c"]:
+            # Standard sequential flow
+            val, status = get_robust_reading(key)
+            results[key] = val
+            
+            label = config.BIN_CONFIGS[key]["label"]
+            status_icon = "✅" if status == "LIVE" else "⏳"
+            print(f"  {status_icon} Bin {key.upper()} ({label}): {val} cm")
+            
+            # POWER RECOVERY: The most important part for Pi 5
+            # We wait 0.4s between DIFFERENT physical sensors
+            time.sleep(0.4)
+
+    return results
 
 def get_single_bin_median(key):
     """Helper to sample a specific sensor 5 times and return median."""
@@ -92,37 +143,6 @@ def get_single_bin_median(key):
             sleep(0.06)
             
     return round(statistics.median(readings), 2) if readings else None
-
-def update_bin_levels():
-    print("📊 Measuring bin fill levels...")
-    results = {}
-
-    with profile_block("bin_level_scan_total"):
-        for key in ["c", "b", "a"]:
-            # Perform the robust reading
-            results[key] = get_robust_reading(key)
-            
-            label = config.BIN_CONFIGS[key]["label"]
-            print(f"  - Bin {key.upper()} ({label}): {results[key]} cm")
-            
-            # BIGGER SETTLE DELAY: This is key for software-only power management.
-            # We wait 0.3s before moving to the NEXT physical sensor.
-            with profile_block(f"bin_{key}_settle_delay"):
-                time.sleep(0.3) 
-
-        # --- SECOND PASS: Targeted Retry ---
-        failed_bins = [k for k, v in results.items() if v is None]
-        if failed_bins:
-            print(f"⚠️ Power/Signal dip detected. Retrying: {', '.join(failed_bins).upper()}")
-            # Extra long wait before retries to let the Pi's power management stabilize
-            time.sleep(0.5) 
-            for key in failed_bins:
-                results[key] = get_robust_reading(key)
-                print(f"  - Retry Bin {key.upper()}: {results[key]} cm")
-                time.sleep(0.2)
-
-    return results
-
 
 def run_sequence(target_angle):
     """Run one complete servo sequence. Returns immediately if already busy."""
