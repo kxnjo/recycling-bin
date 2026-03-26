@@ -59,7 +59,7 @@ def _run_inference(frame):
         project_name=f"smart_bin_{model_type}",
         measure_power_secs=1,
         save_to_file=True,
-        logging_level='error' # Keep console clean
+        logging_logger='error' # Keep console clean
     )
 
     tracker.start()
