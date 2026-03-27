@@ -22,6 +22,7 @@ import json
 inference_event = Event()
 inference_result = {"label": None}
 current_request_id = None  
+SYSTEM_RUNNING = True
 
 # ================================
 # ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ BUTTON ROUTING
@@ -363,7 +364,7 @@ def monitor_detection():
     last_retry_time = 0
     global ultra_history
 
-    while True:
+    while SYSTEM_RUNNING:
         if time() - last_retry_time > 10:
             resend_offline_logs() # attempt to send any failed logs every 10 seconds
             last_retry_time = time()
@@ -466,6 +467,8 @@ if __name__ == "__main__":
         
     except KeyboardInterrupt:
         print("\n[SYSTEM] Shutting down cleanly...")
+        SYSTEM_RUNNING = False
+        sleep(0.5) 
     finally:
         # 3. ALWAYS clean up the GPIO pins on exit
         GPIO.cleanup()
