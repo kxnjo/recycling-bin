@@ -129,6 +129,8 @@ def infer_frame(frame):
     else:
         print("[AI WARNING] Could not classify image. Defaulting to GENERAL.")
 
+    return bin_choice
+
 def do_infer(image_bytes):
     # print(f"\n[AI VISION] Running inference on received image bytes...")
     """runs Custom YOLO Classification, and returns the target bin category."""
