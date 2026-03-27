@@ -1,18 +1,13 @@
 # hardware.py
 import statistics
-from time import sleep
+from time import sleep, time
 from threading import Lock
-from gpiozero import Button, AngularServo, DistanceSensor
+from gpiozero import Button, AngularServo 
 import config
+import RPi.GPIO as GPIO
 
 # Lock prevents re-triggering while busy
 seq_lock = Lock()
-
-# --- Initialize Sensors ---
-sensors = {
-    key: DistanceSensor(echo=cfg['echo'], trigger=cfg['trigger']) 
-    for key, cfg in config.BIN_CONFIGS.items()
-}
 
 # --- Initialize Buttons ---
 button1 = Button(config.BTN_1_PIN, pull_up=True)
@@ -42,22 +37,57 @@ servo2 = AngularServo(
 servo.angle = config.MAIN_HOME
 servo2.angle = config.FS90_HOME
 
+def setup_ultrasonic():
+    """Initializes all ultrasonic pins identically."""
+    GPIO.setmode(GPIO.BCM)
+    for key, config in config.BIN_CONFIGS.items():
+        GPIO.setup(config['trigger'], GPIO.OUT)
+        GPIO.setup(config['echo'], GPIO.IN)
+        GPIO.output(config['trigger'], False) # Start LOW
+    sleep(0.5) # Let sensors settle
+    print("[SYSTEM] Ultrasonic hardware initialized.")
+
+
+def read_ultrasonic_sensor(sensor_key):
+    """Retrieves distance (in cm) for a specific sensor safely."""
+    if sensor_key not in config.BIN_CONFIGS: return None
+    trig, echo = config.BIN_CONFIGS[sensor_key]['trigger'], config.BIN_CONFIGS[sensor_key]['echo']
+
+    # 10us Pulse
+    GPIO.output(trig, True)
+    sleep(0.00001)
+    GPIO.output(trig, False)
+
+    start_time = time()
+    pulse_start, pulse_end = None, None
+
+    # Wait for echo START (0.1s timeout)
+    while GPIO.input(echo) == 0:
+        pulse_start = time()
+        if pulse_start - start_time > 0.1: return None
+
+    # Wait for echo END (0.1s timeout)
+    while GPIO.input(echo) == 1:
+        pulse_end = time()
+        if pulse_end - pulse_start > 0.1: return None
+
+    if pulse_start and pulse_end:
+        return ((pulse_end - pulse_start) * 34300) / 2
+    return None
+
+
 def update_bin_levels():
-    """Triggers a sequential burst for all 3 bins."""
+    """Triggers a sequential burst for all 3 interior bins."""
     print("📊 Measuring bin fill levels...")
     results = {}
     
     for key in ['a', 'b', 'c']:
         readings = []
-        sensor = sensors[key]
         
         for _ in range(5):
-            try:
-                val = sensor.distance * 100 # cm
-                if 2.0 <= val <= 100.0:
-                    readings.append(val)
-            except:
-                pass
+            val = read_ultrasonic_sensor(key)
+            if val is not None and 2.0 <= val <= 100.0:
+                readings.append(val)
             sleep(0.06) 
             
         median_val = round(statistics.median(readings), 2) if readings else None

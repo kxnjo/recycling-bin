@@ -4,6 +4,7 @@ from signal import pause
 from time import sleep, time
 from unittest import result
 import cv2
+import RPi.GPIO as GPIO
 
 import config
 import hardware
@@ -357,7 +358,6 @@ class DetectState(Enum):
 
 ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger fallback
 def monitor_detection():
-    detect_sensor = hardware.sensors['d']
     state = DetectState.ULTRASONIC
     fail_count = 0
     last_retry_time = 0
@@ -373,15 +373,16 @@ def monitor_detection():
             continue
 
         distance = None
-
         # =========================
-        # READ ULTRASONIC
+        # READ ULTRASONIC (UPDATED)
         # =========================
         try:
-            distance = detect_sensor.distance * 100
-            ultra_history.append(round(distance, 1))
-            if len(ultra_history) > ULTRA_HISTORY_SIZE:
-                ultra_history.pop(0)
+            distance = hardware.read_ultrasonic_sensor('d') 
+            
+            if distance is not None:
+                ultra_history.append(round(distance, 1))
+                if len(ultra_history) > ULTRA_HISTORY_SIZE:
+                    ultra_history.pop(0)
         except Exception as e:
             print(f"[ERROR] Sensor read failed: {e}")
 
@@ -451,9 +452,20 @@ mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from 
 #mqtt_publisher.subscribe_results(process_ai_detection) # for local
 
 # ================================
-# ÃƒÂ°Ã…Â¸Ã…Â¡Ã¢â€šÂ¬ START SYSTEM
+# START SYSTEM
 # ================================
 if __name__ == "__main__":
-    Thread(target=monitor_detection, daemon=True).start()
-    print("Smart Bin System Active with Local AI. Waiting for objects...")
-    pause()
+    try:
+        # 1. Initialize the new sensor logic
+        hardware.setup_ultrasonic()
+        
+        # 2. Start your threads
+        Thread(target=monitor_detection, daemon=True).start()
+        print("Smart Bin System Active with Local AI. Waiting for objects...")
+        pause()
+        
+    except KeyboardInterrupt:
+        print("\n[SYSTEM] Shutting down cleanly...")
+    finally:
+        # 3. ALWAYS clean up the GPIO pins on exit
+        GPIO.cleanup()
