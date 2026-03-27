@@ -7,7 +7,7 @@ import cv2
 import RPi.GPIO as GPIO
 
 import config
-import hardware
+import hardware_threading as hardware
 import ai_vision
 # MQTT
 import mqtt_publisher
