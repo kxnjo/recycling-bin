@@ -7,7 +7,7 @@ import cv2
 import RPi.GPIO as GPIO
 
 import config
-import hardware
+import hardware_threading as hardware
 import ai_vision
 # MQTT
 import mqtt_publisher
@@ -37,6 +37,28 @@ hardware.button2.when_pressed = lambda: handle_button_press(hardware.button2)
 hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
 
 
+# ======= THREADING FUNCTIONS =======
+def process_levels_and_http(label, inference_id):
+    """
+    Runs in the background to calculate levels and send HTTP/MQTT updates
+    while the main thread goes back to detecting the next item.
+    """
+    print("[BACKGROUND THREAD] Calculating bin levels...")
+    
+    # Read the depth sensors
+    bin_levels = hardware.update_bin_levels()
+    bin_levels['label'] = label
+    bin_levels['timestamp'] = int(time())
+    bin_levels['inference_id'] = inference_id
+    
+    print("[BACKGROUND THREAD] Sending data to Manager Pi / Cloud...")
+    send_bin_levels_http(bin_levels)
+    print("[BACKGROUND THREAD] Update complete.")
+
+
+
+
+
 # ================================
 # AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
 # ================================
@@ -54,16 +76,15 @@ def process_ai_detection():
     else: # general
         Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
 
-    hardware.seq_lock.acquire()  # wait until servo finishes
-    bin_levels = hardware.update_bin_levels()
-    print(f"[ACTION] sending data to dashboard")
-    bin_levels['label'] = target_bin
-    bin_levels['timestamp'] = int(time())
-    mqtt_publisher.send_bin_levels(bin_levels)  # send via MQTT
+    # Wait for the hardware sequence to finish
+    sleep(0.1)
+    hardware.seq_lock.acquire()  
     hardware.seq_lock.release()
-    print(f"[ACTION] sending data to dashboard")
+    
+    # 3. Servo is home! Spawn the HTTP/Level checking thread (Use 'local' as inference_id)
+    Thread(target=process_levels_and_http, args=(target_bin, "local_fallback"), daemon=True).start()
 
-    # 3. Unlock the event
+    # 4. Unlock the event immediately for the next item
     capture_event.clear()
 
 # ================================
@@ -112,7 +133,7 @@ def camera_capture():
     }
     mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    if inference_event.wait(timeout=0.1):  # block here until MQTT responds or times out
+    if inference_event.wait(timeout=3):  # block here until MQTT responds or times out
         result = inference_result["label"]
         if result:
             print(f"[PIPE] MQTT succeeded: {result}")
@@ -226,7 +247,7 @@ def resend_offline_logs():
         f.writelines(remaining_lines)
     
 
-CLOUD_MODEL_URL = "http://54.227.231.254:5000/infer"
+CLOUD_MODEL_URL = "http://3.93.218.220:5000/infer"
 def send_image_cloud(image_bytes):
     try:
         response = requests.post(CLOUD_MODEL_URL, data=image_bytes)
@@ -276,25 +297,31 @@ def handle_inference_result(msg):
 def handle_final_result(result, inference_id):
     print("[FINAL RESULT]:", result)
     print("[FINAL]: DONE BY:", inference_id)
+    
+    # 1. Start the sorting sequence
     if result.lower() == "plastic":
-        Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
+        angle = 90
     elif result.lower() == "paper":
-        Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
+        angle = 180
     else:
-        Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
+        angle = 0
+        
+    Thread(target=hardware.run_sequence, args=(angle,), daemon=True).start()
 
-    hardware.seq_lock.acquire()
+    # 2. Wait for the hardware sequence to finish (servo drops item and returns home)
+    sleep(0.1) # Brief pause to ensure the hardware thread acquires the lock first
+    hardware.seq_lock.acquire() 
+    hardware.seq_lock.release() 
+    
+    # 3. Servo is home! Spawn the HTTP/Level checking thread
+    Thread(target=process_levels_and_http, args=(result, inference_id), daemon=True).start()
 
-    bin_levels = hardware.update_bin_levels()
-    bin_levels['label'] = result
-    bin_levels['timestamp'] = int(time())
-    bin_levels['inference_id'] = inference_id
-    send_bin_levels_http(bin_levels)
-
-    hardware.seq_lock.release()
+    # 4. Instantly clear the capture event so monitor_detection can find the next item
     capture_event.clear()
+
+    
 # ================================
-# ÃÆÃÂ°Ãâ€¦ÃÂ¸ÃÂ¢Ã¢â€Â¬ÃÅÃÂ¢Ã¢â¬Å¡ÃÂ¬ DISTANCE MONITOR
+# DISTANCE MONITOR
 # ================================
 ultra_history = []
 ULTRA_HISTORY_SIZE = 5
@@ -310,7 +337,7 @@ def is_ultrasonic_healthy(distance):
             # stuck_val = ultra_history[-1]
             # if stuck_val <= 0 or stuck_val >= 400:  # only flag boundary values
                 # return False
-    return True
+    return False
 
 fallback_cap = None
 prev_frame = None
@@ -385,8 +412,7 @@ ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger f
 prev_distance = None
 
 def monitor_detection():
-    state = DetectState.ULTRASONIC
-
+    state = DetectState.CAMERA_FALLBACK
     fail_count = 0
     last_retry_time = 0
     global ultra_history
@@ -414,7 +440,8 @@ def monitor_detection():
         except Exception as e:
             print(f"[ERROR] Sensor read failed: {e}")
 
-        healthy = is_ultrasonic_healthy(distance)
+        # healthy = is_ultrasonic_healthy(distance)
+        healthy = False
 
         # =========================
         # STATE: ULTRASONIC
@@ -460,6 +487,8 @@ def monitor_detection():
         # STATE: CAMERA FALLBACK
         # =========================
         elif state == DetectState.CAMERA_FALLBACK:
+            start_fallback_camera()
+            
             if camera_detects_object():
                 print("[ð·] Fallback camera detected object!")
                 camera_capture()
