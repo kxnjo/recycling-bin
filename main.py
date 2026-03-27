@@ -25,7 +25,7 @@ current_request_id = None
 SYSTEM_RUNNING = True
 
 # ================================
-# ÃƒÂ°Ã…Â¸Ã…Â½Ã‚Â¯ BUTTON ROUTING
+# ÃÆÃÂ°Ãâ€¦ÃÂ¸Ãâ€¦ÃÂ½Ãâ€ÃÂ¯ BUTTON ROUTING
 # ================================
 def handle_button_press(btn):
     angle = hardware.BUTTON_ANGLES[btn]
@@ -38,7 +38,7 @@ hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
 
 
 # ================================
-# ÃƒÂ°Ã…Â¸Ã‚Â§Ã‚Â  AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
+# ÃÆÃÂ°Ãâ€¦ÃÂ¸Ãâ€ÃÂ§Ãâ€ÃÂ  AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
 # ================================
 def process_ai_detection():
     # 1. Take picture and get result from ai_vision module
@@ -71,18 +71,21 @@ def process_ai_detection():
 # ================================
 def camera_capture():
     global current_request_id
-
-    print("[CAMERA] Capturing image...")
+    
+    # Prevent concurrent captures
+    if capture_event.is_set():
+        print("[CAMERA] Already processing, skipping.")
+        return
+    
     capture_event.set()
+    print("[CAMERA] Capturing image...")
 
     ret, frame = get_frame()
-
     if not ret:
         print("[ERROR] Could not capture frame")
         capture_event.clear()
         return
 
-    # Encode image
     success, buffer = cv2.imencode('.jpg', frame)
     if not success:
         print("[ERROR] Failed to encode image")
@@ -90,56 +93,86 @@ def camera_capture():
         return
 
     image_bytes = buffer.tobytes()
-
-    # ðŸ†” Generate unique request ID
     current_request_id = str(uuid.uuid4())
 
-    message = {
-        "id": current_request_id,
-        "image": image_bytes.hex()  # (can optimize later)
-    }
-
-    # Reset state
+    # Reset MQTT inference state
     inference_event.clear()
     inference_result["label"] = None
-
-    start = time()
+    
+    inference_id = None # to check who did inference
     result = None
 
-    # =========================
-    # 1. MQTT Inference (Pi 2)
-    # =========================
+    # ======================
+    # 1. TRY MQTT (blocking wait)
+    # ======================
+    print("[PIPE] Sending via MQTT, waiting for result...")
+    message = {
+        "id": current_request_id,
+        "image": image_bytes.hex()
+    }
     mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    if inference_event.wait(timeout=0.2): # if too slow , do local inference
-        latency = time() - start
-        print(f"[SUCCESS] Result received in {latency:.2f}s")
+    if inference_event.wait(timeout=0.1):  # block here until MQTT responds or times out
         result = inference_result["label"]
+        if result:
+            print(f"[PIPE] MQTT succeeded: {result}")
+            inference_id = "mqtt"
+        else:
+            print("[PIPE] MQTT returned empty label, falling through...")
+            result = None
 
-    # =========================
-    # 2. Local AI fallback (Pi 1)
-    # =========================
-    else:
+    # ======================
+    # 2. TRY LOCAL AI (only if MQTT failed)
+    # ======================
+    if result is None:
+        print("[PIPE] MQTT failed ? trying Local AI...")
         try:
-            print("[FALLBACK] Timeout → running local AI")
-            ai_vision.init_model()
-            current_request_id = None
-            # result = ai_vision.capture_and_infer()
-            result = ai_vision.infer_frame(frame)
-        # =========================
-        # 3. Cloud fallback
-        # =========================
+            result = ai_vision.infer_frame(frame)  # assumed blocking
+            if result:
+                print(f"[PIPE] Local AI succeeded: {result}")
+                inference_id = "local"
+            else:
+                print("[PIPE] Local AI returned None, falling through...")
+                result = None
         except Exception as e:
-            print(f"[FALLBACK] Local AI failed: {e}")
-            print("[FALLBACK] Trying cloud inference...")
+            print(f"[PIPE] Local AI failed: {e}")
+            result = None
+
+    # ======================
+    # 3. TRY CLOUD (only if local also failed)
+    # ======================
+    if result is None:
+        print("[PIPE] Local AI failed ? trying Cloud...")
+        try:
             result = send_image_cloud(image_bytes)
+            if result:
+                print(f"[PIPE] Cloud succeeded: {result}")
+                inference_id = "cloud"
+            else:
+                print("[PIPE] Cloud returned None.")
+        except Exception as e:
+            print(f"[PIPE] Cloud failed: {e}")
+            result = None
 
-    # Once we have a result, 
-    if result is not None:
-        handle_final_result(result)
+    # ======================
+    # 4. HANDLE RESULT OR GIVE UP
+    # ======================
+    if result:
+        handle_final_result(result, inference_id)
     else:
-        print("[ERROR] All inference methods failed")
+        print("[PIPE] ALL SOURCES FAILED, no action taken.")
+        capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
 
+def set_final_result(value):
+    global result_lock, final_result
+
+    if result_lock:
+        return False   # already taken, ignore
+
+    result_lock = True
+    final_result = value
+    return True
+    
 # ================================
 # SEND HTTP REQUEST I THINK
 # ================================
@@ -202,7 +235,7 @@ def resend_offline_logs():
         f.writelines(remaining_lines)
     
 
-CLOUD_MODEL_URL = "http://44.201.198.140:5000/infer"
+CLOUD_MODEL_URL = "http://3.93.218.220:5000/infer"
 def send_image_cloud(image_bytes):
     try:
         response = requests.post(CLOUD_MODEL_URL, data=image_bytes)
@@ -249,9 +282,9 @@ def handle_inference_result(msg):
     inference_result["label"] = label
     inference_event.set()
     
-def handle_final_result(result):
+def handle_final_result(result, inference_id):
     print("[FINAL RESULT]:", result)
-
+    print("[FINAL]: DONE BY:", inference_id)
     if result.lower() == "plastic":
         Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
     elif result.lower() == "paper":
@@ -264,28 +297,28 @@ def handle_final_result(result):
     bin_levels = hardware.update_bin_levels()
     bin_levels['label'] = result
     bin_levels['timestamp'] = int(time())
-
+    bin_levels['inference_id'] = inference_id
     send_bin_levels_http(bin_levels)
 
     hardware.seq_lock.release()
     capture_event.clear()
 # ================================
-# ÃƒÂ°Ã…Â¸Ã¢â‚¬ËœÃ¢â€šÂ¬ DISTANCE MONITOR
+# ÃÆÃÂ°Ãâ€¦ÃÂ¸ÃÂ¢Ã¢â€Â¬ÃÅÃÂ¢Ã¢â¬Å¡ÃÂ¬ DISTANCE MONITOR
 # ================================
 ultra_history = []
 ULTRA_HISTORY_SIZE = 5
 
 def is_ultrasonic_healthy(distance):
-    if distance is None:
-        return False
-    if distance <= 0 or distance > 400:
-        return False
-    # Only flag as stuck if repeating an invalid-looking value
-    if len(ultra_history) >= ULTRA_HISTORY_SIZE:
-        if len(set(ultra_history[-ULTRA_HISTORY_SIZE:])) == 1:
-            stuck_val = ultra_history[-1]
-            if stuck_val <= 0 or stuck_val >= 400:  # only flag boundary values
-                return False
+    # if distance is None:
+        # return False
+    # if distance <= 0 or distance > 400:
+        # return False
+    # # Only flag as stuck if repeating an invalid-looking value
+    # if len(ultra_history) >= ULTRA_HISTORY_SIZE:
+        # if len(set(ultra_history[-ULTRA_HISTORY_SIZE:])) == 1:
+            # stuck_val = ultra_history[-1]
+            # if stuck_val <= 0 or stuck_val >= 400:  # only flag boundary values
+                # return False
     return True
 
 fallback_cap = None
@@ -358,6 +391,8 @@ class DetectState(Enum):
     CAMERA_FALLBACK = 2
 
 ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger fallback
+prev_distance = None
+
 def monitor_detection():
     state = DetectState.ULTRASONIC
     fail_count = 0
@@ -395,32 +430,52 @@ def monitor_detection():
         if state == DetectState.ULTRASONIC:
             if not healthy:
                 fail_count += 1
-                print(f"[⚠️] Ultrasonic unhealthy ({fail_count}/{ULTRASONIC_FAIL_THRESHOLD})")
+                print(f"[â ï¸] Ultrasonic unhealthy ({fail_count}/{ULTRASONIC_FAIL_THRESHOLD})")
                 if fail_count >= ULTRASONIC_FAIL_THRESHOLD:
-                    print("[⚠️] Confirmed failure → switching to CAMERA fallback")
+                    print("[â ï¸] Confirmed failure â switching to CAMERA fallback")
                     start_fallback_camera()
                     state = DetectState.CAMERA_FALLBACK
                     fail_count = 0
             else:
                 fail_count = 0  # reset on any good reading
 
-                if distance and 0 < distance <= config.DETECT_THRESHOLD:
-                    print(f"\n[DETECT] Ultrasonic: {round(distance,1)} cm")
+            global prev_distance
+            print(f"prev distance: {prev_distance}")
+            if distance:
+                triggered = False
+
+                # 1. Standard threshold (Is an object physically close?)
+                if 0 < distance <= config.DETECT_THRESHOLD:
+                    triggered = True
+
+                # 2. Sudden drop detection (Did an object suddenly appear?)
+                if prev_distance is not None:
+                    delta = prev_distance - distance
+                            
+                    # Trigger only if distance SHRINKS by more than 10cm instantly
+                    if delta > 10: 
+                        print(f"[DEBUG] Sudden drop detected: {round(delta,1)} cm")
+                        triggered = True
+
+                if triggered:
+                    print(f"\n[DETECT] Triggered at {round(distance,1)} cm")
                     camera_capture()
                     sleep(2)
+                
+                prev_distance = distance
 
         # =========================
         # STATE: CAMERA FALLBACK
         # =========================
         elif state == DetectState.CAMERA_FALLBACK:
             if camera_detects_object():
-                print("[📷] Fallback camera detected object!")
+                print("[ð·] Fallback camera detected object!")
                 camera_capture()
                 sleep(2)
 
             # Try recovery
             if healthy:
-                print("[🔄] Ultrasonic recovering...")
+                print("[ð] Ultrasonic recovering...")
                 stop_fallback_camera()
                 state = DetectState.ULTRASONIC
                 fail_count = 0
