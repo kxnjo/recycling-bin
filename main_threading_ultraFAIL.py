@@ -8,7 +8,7 @@ import RPi.GPIO as GPIO
 
 import config
 import hardware_threading as hardware
-import ai_vision
+import ai_vision_NEW as ai_vision
 
 # Profiling imports added
 from profiler import log_profile, now, profile_block
