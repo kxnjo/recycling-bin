@@ -133,7 +133,7 @@ def camera_capture():
     }
     mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    if inference_event.wait(timeout=0.1):  # block here until MQTT responds or times out
+    if inference_event.wait(timeout=3):  # block here until MQTT responds or times out
         result = inference_result["label"]
         if result:
             print(f"[PIPE] MQTT succeeded: {result}")
