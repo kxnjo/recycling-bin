@@ -386,6 +386,8 @@ prev_distance = None
 
 def monitor_detection():
     state = DetectState.CAMERA_FALLBACK
+    start_fallback_camera()
+    
     fail_count = 0
     last_retry_time = 0
     global ultra_history
@@ -413,7 +415,8 @@ def monitor_detection():
         except Exception as e:
             print(f"[ERROR] Sensor read failed: {e}")
 
-        healthy = is_ultrasonic_healthy(distance)
+        # healthy = is_ultrasonic_healthy(distance)
+        healthy = False
 
         # =========================
         # STATE: ULTRASONIC
