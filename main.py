@@ -310,7 +310,7 @@ def is_ultrasonic_healthy(distance):
             # stuck_val = ultra_history[-1]
             # if stuck_val <= 0 or stuck_val >= 400:  # only flag boundary values
                 # return False
-    return True
+    return False
 
 fallback_cap = None
 prev_frame = None
