@@ -226,7 +226,7 @@ def resend_offline_logs():
         f.writelines(remaining_lines)
     
 
-CLOUD_MODEL_URL = "http://3.93.218.220:5000/infer"
+CLOUD_MODEL_URL = "http://54.227.231.254:5000/infer"
 def send_image_cloud(image_bytes):
     try:
         response = requests.post(CLOUD_MODEL_URL, data=image_bytes)
@@ -387,7 +387,7 @@ prev_distance = None
 def monitor_detection():
     state = DetectState.CAMERA_FALLBACK
     start_fallback_camera()
-    
+
     fail_count = 0
     last_retry_time = 0
     global ultra_history
