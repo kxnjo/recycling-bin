@@ -43,6 +43,8 @@ else
     echo "Already updated to the latest version"
 fi
 
+# send ping to endpoint
+
 # 2. activate .venv
 /home/dougey/Desktop/recycling-bin/.venv/bin/python 
 
