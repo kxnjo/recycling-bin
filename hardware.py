@@ -40,10 +40,12 @@ servo2.angle = config.FS90_HOME
 def setup_ultrasonic():
     """Initializes all ultrasonic pins identically."""
     GPIO.setmode(GPIO.BCM)
-    for key, config in config.BIN_CONFIGS.items():
-        GPIO.setup(config['trigger'], GPIO.OUT)
-        GPIO.setup(config['echo'], GPIO.IN)
-        GPIO.output(config['trigger'], False) # Start LOW
+    
+    for key, cfg in config.BIN_CONFIGS.items():
+        GPIO.setup(cfg['trigger'], GPIO.OUT)
+        GPIO.setup(cfg['echo'], GPIO.IN)
+        GPIO.output(cfg['trigger'], False) # Start LOW
+        
     sleep(0.5) # Let sensors settle
     print("[SYSTEM] Ultrasonic hardware initialized.")
 
