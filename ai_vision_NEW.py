@@ -83,6 +83,8 @@ def capture_and_infer():
     # Returns exactly "plastic", "paper", or "general" straight to main.py
     return bin_choice
 def infer_frame(frame):
+    init_model()
+
     img_path = "capture.jpg"
     cv2.imwrite(img_path, frame)
         # Grab the resolution from config
