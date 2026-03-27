@@ -1,7 +1,7 @@
 import paho.mqtt.client as mqtt
 import json
 
-from pi_2_main import STATUS_TOPIC
+# from pi_2_main import STATUS_TOPIC
 
 # TO UPDATE IP ADDRESS IN pi_2_main.py AS WELL
 BROKER = "10.39.196.120"   # IP of your broker
