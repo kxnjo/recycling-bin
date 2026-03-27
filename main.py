@@ -385,7 +385,7 @@ ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger f
 prev_distance = None
 
 def monitor_detection():
-    state = DetectState.ULTRASONIC
+    state = DetectState.CAMERA_FALLBACK
     fail_count = 0
     last_retry_time = 0
     global ultra_history
