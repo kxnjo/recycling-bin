@@ -25,7 +25,7 @@ current_request_id = None
 SYSTEM_RUNNING = True
 
 # ================================
-# ÃÆÃÂ°Ãâ€¦ÃÂ¸Ãâ€¦ÃÂ½Ãâ€ÃÂ¯ BUTTON ROUTING
+# BUTTON ROUTING
 # ================================
 def handle_button_press(btn):
     angle = hardware.BUTTON_ANGLES[btn]
@@ -38,7 +38,7 @@ hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
 
 
 # ================================
-# ÃÆÃÂ°Ãâ€¦ÃÂ¸Ãâ€ÃÂ§Ãâ€ÃÂ  AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
+# AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
 # ================================
 def process_ai_detection():
     # 1. Take picture and get result from ai_vision module
@@ -163,15 +163,6 @@ def camera_capture():
         print("[PIPE] ALL SOURCES FAILED, no action taken.")
         capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
 
-def set_final_result(value):
-    global result_lock, final_result
-
-    if result_lock:
-        return False   # already taken, ignore
-
-    result_lock = True
-    final_result = value
-    return True
     
 # ================================
 # SEND HTTP REQUEST I THINK
