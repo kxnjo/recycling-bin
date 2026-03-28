@@ -163,14 +163,7 @@ def camera_capture():
     # ======================
     # 1. TRY MQTT (blocking wait)
     # ======================
-    print("[PIPE] Sending via MQTT, waiting for result...")
-    message = {
-        "id": current_request_id,
-        "image": image_bytes.hex()
-    }
-    
-
-    if USE_MQTT:
+    if USE_MQTT:        
         print("[PIPE] Sending via MQTT, waiting for result...")
         message = {
             "id": current_request_id,
