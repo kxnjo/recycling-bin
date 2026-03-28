@@ -23,7 +23,8 @@ def on_message(client, userdata, msg):
     image_bytes = bytes.fromhex(image_hex)
 
     # Run inference
-    label = ai_vision.do_infer(image_bytes)
+    # label = ai_vision.do_infer(image_bytes)
+    label = ai_vision.infer(image_bytes=image_bytes) # new version that takes bytes directly
 
     # Send result back
     response = {

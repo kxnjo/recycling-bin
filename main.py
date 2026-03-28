@@ -14,7 +14,7 @@ import mqtt_publisher
 capture_event = Event()
 # HTTP
 import requests
-
+import http_controller
 #MQTT QoS Test
 import uuid
 import json
@@ -35,36 +35,6 @@ def handle_button_press(btn):
 hardware.button1.when_pressed = lambda: handle_button_press(hardware.button1)
 hardware.button2.when_pressed = lambda: handle_button_press(hardware.button2)
 hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
-
-
-# ================================
-# AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
-# ================================
-def process_ai_detection():
-    # 1. Take picture and get result from ai_vision module
-    ai_vision.init_model()  # Load model before first inference
-    target_bin = ai_vision.capture_and_infer()
-
-    # 2. Trigger hardware based on result
-    print(f"[ACTION] Routing item to {target_bin.upper()} bin...")
-    if target_bin.lower() == "plastic":
-        Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
-    elif target_bin.lower() == "paper":
-        Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
-    else: # general
-        Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
-
-    hardware.seq_lock.acquire()  # wait until servo finishes
-    bin_levels = hardware.update_bin_levels()
-    print(f"[ACTION] sending data to dashboard")
-    bin_levels['label'] = target_bin
-    bin_levels['timestamp'] = int(time())
-    mqtt_publisher.send_bin_levels(bin_levels)  # send via MQTT
-    hardware.seq_lock.release()
-    print(f"[ACTION] sending data to dashboard")
-
-    # 3. Unlock the event
-    capture_event.clear()
 
 # ================================
 # CAMERA CAPTURE & MQTT SENDING
@@ -127,7 +97,8 @@ def camera_capture():
     if result is None:
         print("[PIPE] MQTT failed ? trying Local AI...")
         try:
-            result = ai_vision.infer_frame(frame)  # assumed blocking
+            #result = ai_vision.infer_frame(frame)  # assumed blocking
+            result = ai_vision.infer(frame=frame) # new version that takes frame directly
             if result:
                 print(f"[PIPE] Local AI succeeded: {result}")
                 inference_id = "local"
@@ -144,7 +115,7 @@ def camera_capture():
     if result is None:
         print("[PIPE] Local AI failed ? trying Cloud...")
         try:
-            result = send_image_cloud(image_bytes)
+            result = http_controller.send_image_cloud(image_bytes)
             if result:
                 print(f"[PIPE] Cloud succeeded: {result}")
                 inference_id = "cloud"
@@ -163,83 +134,6 @@ def camera_capture():
         print("[PIPE] ALL SOURCES FAILED, no action taken.")
         capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
 
-    
-# ================================
-# SEND HTTP REQUEST I THINK
-# ================================
-API_URL = "https://zoax1qwl2f.execute-api.us-east-1.amazonaws.com/bin"
-
-def send_bin_levels_http(bin_levels):
-    try:
-        response = requests.post(API_URL, json=bin_levels)
-        if response.status_code == 200:
-            print(f"[HTTP] Sent bin levels, status: {response.status_code}")
-        else:
-            print(f"[HTTP] Failed to send bin levels, status: {response.status_code}")
-            save_to_local_log(bin_levels)
-    except Exception as e:
-        print(f"[HTTP] Failed: {e}")
-        save_to_local_log(bin_levels)
-
-
-LOG_FILE = "offline_bin_logs.jsonl"
-
-def save_to_local_log(data):
-    try:
-        with open(LOG_FILE, "a") as f:
-            f.write(json.dumps(data) + "\n")
-        print("[LOG] Saved data locally")
-    except Exception as e:
-        print(f"[LOG ERROR] Could not write to file: {e}")
-
-BATCH_SIZE = 10
-
-def resend_offline_logs():
-    try:
-        with open(LOG_FILE, "r") as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        return
-
-    remaining_lines = []
-
-    # Process in batches
-    for i in range(0, len(lines), BATCH_SIZE):
-        batch = lines[i:i+BATCH_SIZE]
-        data_batch = [json.loads(line) for line in batch]
-
-        try:
-            response = requests.post(API_URL + "/batch", json=data_batch, timeout=3)
-
-            if response.status_code == 200:
-                print(f"[RETRY] Sent batch of {len(batch)} logs")
-            else:
-                print("[RETRY] Batch failed")
-                remaining_lines.extend(batch)
-
-        except:
-            print("[RETRY] Network error, keeping batch")
-            remaining_lines.extend(batch)
-
-    # Rewrite file with failed logs only
-    with open(LOG_FILE, "w") as f:
-        f.writelines(remaining_lines)
-    
-
-CLOUD_MODEL_URL = "http://54.227.231.254:5000/infer"
-def send_image_cloud(image_bytes):
-    try:
-        response = requests.post(CLOUD_MODEL_URL, data=image_bytes)
-        if response.status_code == 200:
-            result = response.json().get("label")
-            print(f"[CLOUD] Received result: {result}")
-            return result
-        else:
-            print(f"[CLOUD] Inference failed with status: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"[CLOUD] Failed to send image: {e}")
-        return None
 
 # ================================
 # ACTION AFTER RECEIVING MQTT RESULT
@@ -284,15 +178,15 @@ def handle_final_result(result, inference_id):
         Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
 
     hardware.seq_lock.acquire()
-
-    bin_levels = hardware.update_bin_levels()
-    bin_levels['label'] = result
-    bin_levels['timestamp'] = int(time())
-    bin_levels['inference_id'] = inference_id
-    send_bin_levels_http(bin_levels)
-
-    hardware.seq_lock.release()
-    capture_event.clear()
+    try:
+        bin_levels = hardware.update_bin_levels()
+        bin_levels['label'] = result
+        bin_levels['timestamp'] = int(time())
+        bin_levels['inference_id'] = inference_id
+        http_controller.send_bin_levels_http(bin_levels)
+    finally:
+        hardware.seq_lock.release()  # ALWAYS releases, even if exception thrown
+        capture_event.clear()
 # ================================
 # ÃÆÃÂ°Ãâ€¦ÃÂ¸ÃÂ¢Ã¢â€Â¬ÃÅÃÂ¢Ã¢â¬Å¡ÃÂ¬ DISTANCE MONITOR
 # ================================
@@ -318,22 +212,19 @@ prev_frame = None
 def get_frame():
     global fallback_cap
 
-    # Use fallback camera if already started
     if fallback_cap is not None:
-        cap = fallback_cap
+        # Use persistent camera
+        ret, frame = fallback_cap.read()
+        return ret, frame
     else:
+        # Create a one-shot capture
         cap = cv2.VideoCapture(0)
-
-    if not cap.isOpened():
-        print("[ERROR] Camera not available")
-        return False, None
-
-    ret, frame = cap.read()
-
-    if fallback_cap is None:
+        if not cap.isOpened():
+            print("[ERROR] Camera not available")
+            return False, None
+        ret, frame = cap.read()
         cap.release()
-
-    return ret, frame
+        return ret, frame
 
 def start_fallback_camera():
     global fallback_cap
@@ -393,7 +284,7 @@ def monitor_detection():
 
     while SYSTEM_RUNNING:
         if time() - last_retry_time > 10:
-            resend_offline_logs() # attempt to send any failed logs every 10 seconds
+            http_controller.resend_offline_logs() # attempt to send any failed logs every 10 seconds
             last_retry_time = time()
 
         if hardware.seq_lock.locked() or capture_event.is_set():
@@ -469,32 +360,11 @@ def monitor_detection():
             if healthy:
                 print("[ð] Ultrasonic recovering...")
                 stop_fallback_camera()
+                prev_frame = None
                 state = DetectState.ULTRASONIC
                 fail_count = 0
 
         sleep(0.1)
-
-# def monitor_detection():
-#     """Continuously monitor the 'd' sensor and trigger AI."""
-#     detect_sensor = hardware.sensors['d']
-    
-#     while True:
-#         if not hardware.seq_lock.locked() and not capture_event.is_set():
-#             try:
-#                 distance = detect_sensor.distance * 100  # cm
-#                 if 0 < distance <= config.DETECT_THRESHOLD:
-#                     print(f"\n[DETECT] Object detected at {round(distance, 1)} cm!")
-                    
-#                     # Lock the capture event and spin up AI thread
-#                     camera_capture()
-#                     capture_event.clear()
-#                     # Thread(target=camera_capture, daemon=True).start()
-                    
-#                     sleep(2) # Cooldown
-#             except Exception as e:
-#                 print(f"[ERROR] Sensor read failed: {e}")
-        
-#         sleep(0.1)
 
 mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
 #mqtt_publisher.subscribe_results(process_ai_detection) # for local
