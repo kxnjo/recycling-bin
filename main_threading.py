@@ -11,7 +11,7 @@ import hardware_threading as hardware
 import ai_vision_NEW as ai_vision
 
 # Profiling imports added
-from profiler import log_profile, now, profile_block, profile_cpu
+from profiler import log_profile, now, profile_block, profile_cpu, reset_logs, log_cpu_usage
 
 # MQTT
 import mqtt_publisher
@@ -701,6 +701,109 @@ def monitor_detection():
 
         sleep(0.1)
 
+# MARK: ULTRASONIC ONLY
+@profile_cpu
+def ultrasonic_trigger_monitor_cycle():
+    """
+    One pure ultrasonic-trigger monitoring cycle.
+    No fallback logic.
+    No camera trigger logic.
+    Only:
+    - ultrasonic read
+    - history update
+    - threshold check
+    - sudden drop check
+    """
+    global prev_distance
+
+    distance = None
+    triggered = False
+
+    try:
+        distance = ultrasonic_check()
+        update_ultra_history(distance)
+    except Exception as e:
+        print(f"[ERROR] Ultrasonic read failed: {e}")
+        distance = None
+
+    print(f"prev distance: {prev_distance}")
+
+    if distance:
+        # 1. Standard threshold trigger
+        if 0 < distance <= config.DETECT_THRESHOLD:
+            triggered = True
+
+        # 2. Sudden drop trigger
+        if prev_distance is not None:
+            delta = prev_distance - distance
+            if delta > 10:
+                print(f"[DEBUG] Sudden drop detected: {round(delta, 1)} cm")
+                triggered = True
+
+        prev_distance = distance
+
+    return {
+        "triggered": triggered,
+        "distance": distance,
+    }
+
+def monitor_detection_ultrasonic_only():
+    global attempt_no, last_detected_at
+
+    while SYSTEM_RUNNING:
+        # do nothing if busy
+        if hardware.seq_lock.locked() or capture_event.is_set():
+            sleep(0.1)
+            continue
+
+        result = ultrasonic_trigger_monitor_cycle()
+
+        if result["triggered"]:
+            attempt_no += 1
+            last_detected_at = now()
+
+            distance = result["distance"]
+            if distance is not None:
+                print(f"\n[DETECT-ULTRA] Attempt {attempt_no}: Triggered at {round(distance, 1)} cm")
+            else:
+                print(f"\n[DETECT-ULTRA] Attempt {attempt_no}: Triggered")
+
+            camera_capture()   # same downstream pipeline
+            sleep(2)           # cooldown to avoid duplicate trigger
+
+        sleep(0.1)
+
+# MARK: CAMERA ONLY
+@profile_cpu
+def pure_camera_monitor_cycle():
+    try:
+        triggered = camera_trigger_check()
+    except Exception as e:
+        print(f"[ERROR] Camera trigger check failed: {e}")
+        triggered = False
+
+    return {"triggered": triggered}
+
+def monitor_detection_camera_only():
+    global attempt_no, last_detected_at
+
+    while SYSTEM_RUNNING:
+        if hardware.seq_lock.locked() or capture_event.is_set():
+            sleep(0.1)
+            continue
+
+        result = pure_camera_monitor_cycle()
+
+        if result["triggered"]:
+            attempt_no += 1
+            last_detected_at = now()
+            print(f"[📷] Attempt {attempt_no}: Camera-only mode detected object!")
+            log_cpu_usage("\nbefore camera capture!")
+            camera_capture()
+            log_cpu_usage("after camera capture!\n")
+            sleep(2)
+
+        sleep(0.1)
 
 mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
 #mqtt_publisher.subscribe_results(process_ai_detection) # for local
@@ -710,11 +813,14 @@ mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from 
 # ================================
 if __name__ == "__main__":
     try:
+        # setup logs
+        reset_logs()
+
         # 1. Initialize the new sensor logic
         hardware.setup_ultrasonic()
         
         # 2. Start your threads
-        Thread(target=monitor_detection, daemon=True).start()
+        Thread(target=monitor_detection_camera_only, daemon=True).start()
         print("Smart Bin System Active with Local AI. Waiting for objects...")
         pause()
         
