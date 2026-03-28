@@ -904,7 +904,7 @@ if __name__ == "__main__":
         hardware.setup_ultrasonic()
         
         # 2. Start your threads
-        Thread(target=monitor_detection_camera_only, daemon=True).start()
+        Thread(target=monitor_detection_ultrasonic_only, daemon=True).start()
         print("Smart Bin System Active with Local AI. Waiting for objects...")
         pause()
         
