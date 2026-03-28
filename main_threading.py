@@ -37,6 +37,9 @@ SYSTEM_RUNNING = True
 attempt_no = 0
 last_detected_at = None
 
+# limit runs to 15 attempts
+MAX_ATTEMPTS = 15
+
 # ================================
 # BUTTON ROUTING
 # ================================
@@ -716,28 +719,29 @@ def camera_monitor_cycle(attempt=None):
 
 # MARK: STEP 1: Monitor detection
 def monitor_detection():
-    global attempt_no, last_detected_at, ultra_history, prev_distance
+    global attempt_no, last_detected_at, ultra_history, prev_distance, SYSTEM_RUNNING
 
     state = DetectState.ULTRASONIC
     fail_count = 0
     last_retry_time = 0
 
     while SYSTEM_RUNNING:
+        if attempt_no >= MAX_ATTEMPTS:
+            print(f"[SYSTEM] Reached max attempts ({MAX_ATTEMPTS}). Stopping run.")
+            SYSTEM_RUNNING = False
+            break
+
         if time() - last_retry_time > 10:
-            resend_offline_logs() # attempt to send any failed logs every 10 seconds
+            resend_offline_logs()
             last_retry_time = time()
 
         # do nothing if the system is already busy
-        # (i.e. while the servo is still moving, or image is being processed)
         if hardware.seq_lock.locked() or capture_event.is_set():
             sleep(0.1)
             continue
 
-        distance = None # keep a note of the previous distance
+        distance = None
 
-        # =========================
-        # STATE: ULTRASONIC
-        # =========================
         if state == DetectState.ULTRASONIC:
             result = ultrasonic_monitor_cycle(attempt=attempt_no + 1)
 
@@ -812,9 +816,14 @@ def ultrasonic_trigger_monitor_cycle(attempt=None):
     }
 
 def monitor_detection_ultrasonic_only():
-    global attempt_no, last_detected_at
+    global attempt_no, last_detected_at, SYSTEM_RUNNING
 
     while SYSTEM_RUNNING:
+        if attempt_no >= MAX_ATTEMPTS:
+            print(f"[SYSTEM] Reached max attempts ({MAX_ATTEMPTS}). Stopping run.")
+            SYSTEM_RUNNING = False
+            break
+
         # do nothing if busy
         if hardware.seq_lock.locked() or capture_event.is_set():
             sleep(0.1)
@@ -833,9 +842,10 @@ def monitor_detection_ultrasonic_only():
                 print(f"\n[DETECT-ULTRA] Attempt {attempt_no}: Triggered")
 
             log_cpu_usage("before_camera_capture_ultrasonic_only", attempt=attempt_no)
-            camera_capture()   # same downstream pipeline
+            camera_capture()
             log_cpu_usage("after_camera_capture_ultrasonic_only", attempt=attempt_no)
-            sleep(2)           # cooldown to avoid duplicate trigger
+
+            sleep(2)
 
         sleep(0.1)
 
@@ -851,9 +861,14 @@ def pure_camera_monitor_cycle(attempt=None):
     return {"triggered": triggered}
 
 def monitor_detection_camera_only():
-    global attempt_no, last_detected_at
+    global attempt_no, last_detected_at, SYSTEM_RUNNING
 
     while SYSTEM_RUNNING:
+        if attempt_no >= MAX_ATTEMPTS:
+            print(f"[SYSTEM] Reached max attempts ({MAX_ATTEMPTS}). Stopping run.")
+            SYSTEM_RUNNING = False
+            break
+
         if hardware.seq_lock.locked() or capture_event.is_set():
             sleep(0.1)
             continue

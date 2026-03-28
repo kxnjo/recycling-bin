@@ -19,6 +19,8 @@ process = psutil.Process(os.getpid())
 psutil.cpu_percent(interval=None)
 process.cpu_percent(interval=None)
 
+VERBOSE_CONSOLE = False
+
 
 # ============================================================
 # LOG DIRECTORY + FILE PATHS
@@ -133,12 +135,13 @@ def log_cpu_usage(stage="", attempt=None):
         row
     )
 
-    print(
-        f"[CPU] attempt={attempt} | {stage} | "
-        f"system={system_cpu:.1f}% | "
-        f"process={process_cpu:.1f}% | "
-        f"mem={memory_percent:.2f}%"
-    )
+    if VERBOSE_CONSOLE:
+        print(
+            f"[CPU] attempt={attempt} | {stage} | "
+            f"system={system_cpu:.1f}% | "
+            f"process={process_cpu:.1f}% | "
+            f"mem={memory_percent:.2f}%"
+        )
 
 
 # ============================================================
@@ -184,7 +187,8 @@ def profile_cpu(func):
             row
         )
 
-        print(f"[CPU] attempt={attempt} | {func.__name__}: {cpu_ms:.2f} ms CPU, {wall_ms:.2f} ms wall")
+        if VERBOSE_CONSOLE:
+            print(f"[CPU] attempt={attempt} | {func.__name__}: {cpu_ms:.2f} ms CPU, {wall_ms:.2f} ms wall")
         return result
 
     return wrapper
@@ -239,7 +243,8 @@ def profile_block(name, extra=None, attempt=None):
         yield
     finally:
         duration_ms = (now() - start) * 1000
-        print(f"[PROFILE] attempt={attempt} | {name}: {duration_ms:.2f} ms")
+        if VERBOSE_CONSOLE:
+            print(f"[PROFILE] attempt={attempt} | {name}: {duration_ms:.2f} ms") 
         log_profile(name, duration_ms, extra, attempt=attempt)
 
 
