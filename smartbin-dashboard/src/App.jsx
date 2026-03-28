@@ -20,15 +20,8 @@ const bins = [
     color: "#10B981",
     icon: "♻️",
   },
-  { label: "Metal", key: "bin_c", flaskKey: "c", color: "#F43F5E", icon: "🔩" },
+  { label: "Paper", key: "bin_c", flaskKey: "c", color: "#F43F5E", icon: "📄" },
 ];
-
-// maps flask label string → bin meta
-const LABEL_MAP = {
-  "General Waste": { icon: "🗑️", key: "bin_a" },
-  Plastic: { icon: "♻️", key: "bin_b" },
-  Metal: { icon: "🔩", key: "bin_c" },
-};
 
 function getEventType(val) {
   if (val >= 90) return "critical";
@@ -38,13 +31,13 @@ function getEventType(val) {
 
 function formatTime(ts) {
   const d = ts ? new Date(ts * 1000) : new Date();
-  return d.toLocaleString("en-SG", { 
+  return d.toLocaleString("en-SG", {
     day: "2-digit",
-    month: "short", 
+    month: "short",
     year: "numeric",
-    hour: "2-digit", 
+    hour: "2-digit",
     minute: "2-digit",
-    second: "2-digit"
+    second: "2-digit",
   });
 }
 
@@ -107,7 +100,7 @@ function BinCard({ bin, val }) {
       <div className="flex items-end gap-1 mb-5">
         <span
           className="text-5xl font-extrabold text-gray-800 leading-none"
-          style={{ fontFamily: "'DM Mono', monospace" }}
+          // style={{ fontFamily: "'DM Mono', monospace" }}
         >
           {display}
         </span>
@@ -136,6 +129,8 @@ export default function App() {
   const prevBinData = useRef({ bin_a: 0, bin_b: 0, bin_c: 0 });
   const activityIdRef = useRef(1);
   const [history, setHistory] = useState([]);
+  const [inferenceId, setInferenceId] = useState("—");
+  const [online, setOnline] = useState(false);
   // Clock
   useEffect(() => {
     const tick = () =>
@@ -168,6 +163,14 @@ export default function App() {
     return () => clearInterval(t);
   }, []);
 
+  const getBinFillPercent = (distance) => {
+    const maxHeight = 20; // cm
+    const fill = maxHeight - distance;
+    const percentage = (fill / maxHeight) * 100;
+
+    return Number(percentage.toFixed(2));
+  };
+
   // Poll Flask API
   useEffect(() => {
     const fetchData = async () => {
@@ -178,11 +181,18 @@ export default function App() {
         if (!res.ok) throw new Error("Not OK");
         const data = await res.json();
         setApiStatus("online");
-
+        if (data.inference_id) {
+          setInferenceId(data.inference_id);
+        }
+        if (data)
+        {
+          setOnline(true);
+        }
+        // setOnline(data.message === "online");
         const newBinData = {
-          bin_a: data.a ?? 0,
-          bin_b: data.b ?? 0,
-          bin_c: data.c ?? 0,
+          bin_a: getBinFillPercent(data.a) ?? 0,
+          bin_b: getBinFillPercent(data.b) ?? 0,
+          bin_c: getBinFillPercent(data.c) ?? 0,
         };
 
         // Log every incoming message — use timestamp to deduplicate
@@ -254,36 +264,20 @@ export default function App() {
         <div className="flex items-center gap-3">
           <div
             className={`flex items-center gap-2 rounded-xl px-4 py-2 border ${
-              apiStatus === "online"
+              online
                 ? "bg-emerald-50 border-emerald-100"
-                : apiStatus === "offline"
-                  ? "bg-rose-50 border-rose-100"
-                  : "bg-gray-50 border-gray-100"
+                : "bg-rose-50 border-rose-100"
             }`}
           >
+            {/* Dot */}
             <span
-              className={`w-2 h-2 rounded-full ${
-                apiStatus === "online"
-                  ? "bg-emerald-500 animate-pulse"
-                  : apiStatus === "offline"
-                    ? "bg-rose-500"
-                    : "bg-gray-400 animate-pulse"
+              className={`w-2.5 h-2.5 rounded-full ${
+                online ? "bg-emerald-500" : "bg-rose-500"
               }`}
             />
-            <span
-              className={`text-xs font-semibold uppercase tracking-wider ${
-                apiStatus === "online"
-                  ? "text-emerald-600"
-                  : apiStatus === "offline"
-                    ? "text-rose-600"
-                    : "text-gray-500"
-              }`}
-            >
-              {apiStatus === "online"
-                ? "Live"
-                : apiStatus === "offline"
-                  ? "Offline"
-                  : "Connecting"}
+            {/* Text */}
+            <span className="text-xs font-semibold text-gray-700">
+              {online ? "Online" : "Offline"}
             </span>
           </div>
           <div className="bg-white border border-gray-100 rounded-xl px-4 py-2 shadow-sm">
@@ -314,66 +308,6 @@ export default function App() {
           {bins.map((bin) => (
             <BinCard key={bin.key} bin={bin} val={binData[bin.key] ?? 0} />
           ))}
-        </div>
-      </div>
-
-      <div className="h-px bg-gray-100 mb-8" />
-
-      {/* ── System Status Row ── */}
-      <div className="mb-5">
-        <div className="flex items-center gap-2 mb-4">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-          <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-            System Status
-          </p>
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-6 py-4">
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2 flex-shrink-0">
-              <span
-                className="w-2 h-2 rounded-full bg-emerald-500"
-                style={{ boxShadow: "0 0 6px #10B981" }}
-              />
-              <span className="text-xs font-bold text-emerald-700">
-                Operational
-              </span>
-            </div>
-            <div className="w-px h-8 bg-gray-100 flex-shrink-0" />
-            {SYSTEM_CHECKS.map((item, i) => {
-              const isOnline = item.status === "online";
-              const isWarning = item.status === "warning";
-              return (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 bg-gray-50 border border-gray-100 rounded-xl px-3 py-2"
-                >
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                      isOnline
-                        ? "bg-emerald-400"
-                        : isWarning
-                          ? "bg-amber-400"
-                          : "bg-rose-400"
-                    }`}
-                  />
-                  <span className="text-xs font-semibold text-gray-600">
-                    {item.label}
-                  </span>
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider ${
-                      isOnline
-                        ? "text-emerald-500"
-                        : isWarning
-                          ? "text-amber-500"
-                          : "text-rose-500"
-                    }`}
-                  >
-                    {item.status}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
         </div>
       </div>
 
@@ -452,10 +386,7 @@ export default function App() {
                         {event.msg}
                       </p>
                     </div>
-                    <span
-                      className="text-[11px] text-gray-300 flex-shrink-0"
-                      style={{ fontFamily: "'DM Mono', monospace" }}
-                    >
+                    <span className="text-[11px] flex-shrink-0">
                       {event.time}
                     </span>
                   </div>
@@ -470,75 +401,30 @@ export default function App() {
               <h2 className="text-sm font-bold text-gray-700">
                 Waste Classification
               </h2>
-              <p className="text-xs text-gray-400 mt-0.5">
-                CNN — Computer Vision
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3">
-              <span
-                className="w-2.5 h-2.5 rounded-full bg-emerald-500 flex-shrink-0"
-                style={{ boxShadow: "0 0 6px #10B981" }}
-              />
-              <span className="text-sm font-bold text-emerald-700">
-                YOLOv8 Model: Active
-              </span>
-            </div>
-
-            <div className="bg-gray-50 rounded-xl p-4">
-              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-2">
-                Detection Confidence
-              </p>
-              <div className="flex items-end gap-1 mb-3">
-                <span
-                  className="text-4xl font-extrabold text-gray-800 leading-none"
-                  style={{ fontFamily: "'DM Mono', monospace" }}
-                >
-                  94.2
-                </span>
-                <span className="text-base text-gray-300 mb-1">%</span>
-              </div>
-              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: "94.2%",
-                    background: "linear-gradient(90deg, #10B981, #3B82F6)",
-                  }}
-                />
-              </div>
+              <p className="text-xs text-gray-400 mt-0.5">Latest Result</p>
             </div>
 
             <div className="bg-gray-50 rounded-xl p-4">
               <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-2">
                 Last Identified
               </p>
-              <div
-                className="bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm font-semibold text-gray-600"
-                style={{ fontFamily: "'DM Mono', monospace" }}
-              >
-                {lastIdentified}
+              <div className="flex items-end gap-1 mb-3">
+                <span className="text-4xl font-extrabold text-gray-800 leading-none">
+                  {lastIdentified}
+                </span>
               </div>
             </div>
 
-            <div className="mt-auto grid grid-cols-2 gap-2">
-              <div className="rounded-xl bg-gray-50 p-3 text-center">
-                <p
-                  className="text-xl font-extrabold text-gray-700"
-                  style={{ fontFamily: "'DM Mono', monospace" }}
-                >
-                  128
-                </p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Items Today</p>
-              </div>
-              <div className="rounded-xl bg-gray-50 p-3 text-center">
-                <p
-                  className="text-xl font-extrabold text-gray-700"
-                  style={{ fontFamily: "'DM Mono', monospace" }}
-                >
-                  3
-                </p>
-                <p className="text-[10px] text-gray-400 mt-0.5">Categories</p>
+            <div className="bg-gray-50 rounded-xl p-4">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-2">
+                Inference By:
+              </p>
+              <div
+                className="bg-white border border-gray-100 rounded-lg px-3 py-2 text-sm font-semibold text-gray-600"
+                // style={{ fontFamily: "'DM Mono', monospace" }}
+              >
+                {/* Local Model (Pi 2) */}
+                {inferenceId}
               </div>
             </div>
           </div>
