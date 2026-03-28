@@ -14,7 +14,12 @@ import ai_vision_NEW as ai_vision
 from profiler import log_profile, now, profile_block, profile_cpu, reset_logs, log_cpu_usage
 
 # MQTT
-import mqtt_publisher
+USE_MQTT = False # temp disable mqtt
+
+if USE_MQTT:
+    import mqtt_publisher
+else:
+    mqtt_publisher = None
 capture_event = Event()
 # HTTP
 import requests
@@ -164,61 +169,82 @@ def camera_capture():
         "image": image_bytes.hex()
     }
     
-    with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
-        mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-        if inference_event.wait(timeout=3):  # block here in SECONDS until MQTT responds or times out
-            result = inference_result["label"]
-            if result:
-                print(f"[PIPE] MQTT succeeded: {result}")
-                inference_id = "mqtt"
-            else:
-                print("[PIPE] MQTT returned empty label, falling through...")
-                result = None
+    if USE_MQTT:
+        print("[PIPE] Sending via MQTT, waiting for result...")
+        message = {
+            "id": current_request_id,
+            "image": image_bytes.hex()
+        }
 
-    # ======================
-    # 2. TRY LOCAL AI (only if MQTT failed)
-    # ======================
-    if result is None:
-        print("[PIPE] MQTT failed ? trying Local AI...")
-        try:
-            with profile_block("local_ai_inference", extra={"attempt": attempt_no}):
-                result = ai_vision.infer_frame(frame)  # assumed blocking
-            if result:
-                print(f"[PIPE] Local AI succeeded: {result}")
-                inference_id = "local"
-            else:
-                print("[PIPE] Local AI returned None, falling through...")
-                result = None
-        except Exception as e:
-            print(f"[PIPE] Local AI failed: {e}")
-            result = None
+        with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
+            mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    # ======================
-    # 3. TRY CLOUD (only if local also failed)
-    # ======================
-    if result is None:
-        print("[PIPE] Local AI failed ? trying Cloud...")
-        try:
-            with profile_block("cloud_ai_inference", extra={"attempt": attempt_no}):
-                result = send_image_cloud(image_bytes)
-            if result:
-                print(f"[PIPE] Cloud succeeded: {result}")
-                inference_id = "cloud"
-            else:
-                print("[PIPE] Cloud returned None.")
-        except Exception as e:
-            print(f"[PIPE] Cloud failed: {e}")
-            result = None
-
-    # ======================
-    # 4. HANDLE RESULT OR GIVE UP
-    # ======================
-    if result: # GO TO STEP 3: Moving Servos
-        handle_final_result(result, inference_id)
+            if inference_event.wait(timeout=3):  # block here in SECONDS until MQTT responds or times out
+                result = inference_result["label"]
+                if result:
+                    print(f"[PIPE] MQTT succeeded: {result}")
+                    inference_id = "mqtt"
+                else:
+                    print("[PIPE] MQTT returned empty label, falling through...")
+                    result = None
     else:
-        print("[PIPE] ALL SOURCES FAILED, no action taken.")
-        capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
+        print("[PIPE] MQTT disabled, skipping MQTT stage...")
+        with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
+            mqtt_publisher.send_image(json.dumps(message), qos=1)
+
+            if inference_event.wait(timeout=3):  # block here in SECONDS until MQTT responds or times out
+                result = inference_result["label"]
+                if result:
+                    print(f"[PIPE] MQTT succeeded: {result}")
+                    inference_id = "mqtt"
+                else:
+                    print("[PIPE] MQTT returned empty label, falling through...")
+                    result = None
+
+        # ======================
+        # 2. TRY LOCAL AI (only if MQTT failed)
+        # ======================
+        if result is None:
+            print("[PIPE] MQTT failed ? trying Local AI...")
+            try:
+                with profile_block("local_ai_inference", extra={"attempt": attempt_no}):
+                    result = ai_vision.infer_frame(frame)  # assumed blocking
+                if result:
+                    print(f"[PIPE] Local AI succeeded: {result}")
+                    inference_id = "local"
+                else:
+                    print("[PIPE] Local AI returned None, falling through...")
+                    result = None
+            except Exception as e:
+                print(f"[PIPE] Local AI failed: {e}")
+                result = None
+
+        # ======================
+        # 3. TRY CLOUD (only if local also failed)
+        # ======================
+        if result is None:
+            print("[PIPE] Local AI failed ? trying Cloud...")
+            try:
+                with profile_block("cloud_ai_inference", extra={"attempt": attempt_no}):
+                    result = send_image_cloud(image_bytes)
+                if result:
+                    print(f"[PIPE] Cloud succeeded: {result}")
+                    inference_id = "cloud"
+                else:
+                    print("[PIPE] Cloud returned None.")
+            except Exception as e:
+                print(f"[PIPE] Cloud failed: {e}")
+                result = None
+
+        # ======================
+        # 4. HANDLE RESULT OR GIVE UP
+        # ======================
+        if result: # GO TO STEP 3: Moving Servos
+            handle_final_result(result, inference_id)
+        else:
+            print("[PIPE] ALL SOURCES FAILED, no action taken.")
+            capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
 
     
 # ================================
@@ -805,8 +831,9 @@ def monitor_detection_camera_only():
 
         sleep(0.1)
 
-mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
-#mqtt_publisher.subscribe_results(process_ai_detection) # for local
+if USE_MQTT and mqtt_publisher is not None:
+    mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
+    #mqtt_publisher.subscribe_results(process_ai_detection) # for local
 
 # ================================
 # START SYSTEM
