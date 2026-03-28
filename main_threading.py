@@ -57,20 +57,26 @@ def process_levels_and_http(label, inference_id, current_attempt):
     while the main thread goes back to detecting the next item.
     """
     print("[BACKGROUND THREAD] Calculating bin levels...")
-    
-    with profile_block("update_bin_levels", extra={"label": label, "attempt": current_attempt}):
+    log_cpu_usage("before_update_bin_levels", attempt=current_attempt)
+
+    with profile_block("update_bin_levels", extra={"label": label, "attempt": current_attempt}, attempt=current_attempt):
         # Read the depth sensors
         bin_levels = hardware.update_bin_levels()
-        
+
+    log_cpu_usage("after_update_bin_levels", attempt=current_attempt)
+
     bin_levels['label'] = label
     bin_levels['timestamp'] = int(time())
     bin_levels['inference_id'] = inference_id
     bin_levels['attempt'] = current_attempt
-    
+
     print("[BACKGROUND THREAD] Sending data to Manager Pi / Cloud...")
-    with profile_block("send_http_request", extra={"label": label, "attempt": current_attempt}):
+    log_cpu_usage("before_send_http_request", attempt=current_attempt)
+
+    with profile_block("send_http_request", extra={"label": label, "attempt": current_attempt}, attempt=current_attempt):
         send_bin_levels_http(bin_levels)
-        
+
+    log_cpu_usage("after_send_http_request", attempt=current_attempt)
     print("[BACKGROUND THREAD] Update complete.")
 
 
@@ -79,43 +85,59 @@ def process_levels_and_http(label, inference_id, current_attempt):
 # ================================
 def process_ai_detection():
     global attempt_no, last_detected_at
-    
+
     # 1. Take picture and get result from ai_vision module
     ai_vision.init_model()  # Load model before first inference
-    
-    with profile_block("local_capture_and_infer", extra={"attempt": attempt_no}):
+
+    log_cpu_usage("before_local_capture_and_infer", attempt=attempt_no)
+
+    with profile_block("local_capture_and_infer", extra={"attempt": attempt_no}, attempt=attempt_no):
         target_bin = ai_vision.capture_and_infer()
+
+    log_cpu_usage("after_local_capture_and_infer", attempt=attempt_no)
 
     if last_detected_at is not None:
         detect_to_infer_done_ms = (now() - last_detected_at) * 1000
         print(f"[PROFILE] detect_to_infer_done: {detect_to_infer_done_ms:.2f} ms")
-        log_profile("detect_to_infer_done", detect_to_infer_done_ms, {"label": target_bin, "attempt": attempt_no})
+        log_profile(
+            "detect_to_infer_done",
+            detect_to_infer_done_ms,
+            {"label": target_bin, "attempt": attempt_no},
+            attempt=attempt_no
+        )
 
     # 2. Trigger hardware based on result
     print(f"[ACTION] Routing item to {target_bin.upper()} bin...")
-    with profile_block("route_decision", extra={"label": target_bin, "attempt": attempt_no}):
+    with profile_block("route_decision", extra={"label": target_bin, "attempt": attempt_no}, attempt=attempt_no):
         if target_bin.lower() == "plastic":
             angle = 90
         elif target_bin.lower() == "paper":
             angle = 180
         else: # general
             angle = 0
-            
-    with profile_block("servo_thread_start", extra={"label": target_bin, "target": angle, "attempt": attempt_no}):
+
+    with profile_block("servo_thread_start", extra={"label": target_bin, "target": angle, "attempt": attempt_no}, attempt=attempt_no):
         Thread(target=hardware.run_sequence, args=(angle,), daemon=True).start()
 
     # Wait for the hardware sequence to finish
+    log_cpu_usage("before_wait_for_servo_finish", attempt=attempt_no)
     sleep(0.1)
-    hardware.seq_lock.acquire()  
+    hardware.seq_lock.acquire()
     hardware.seq_lock.release()
-    
+    log_cpu_usage("after_wait_for_servo_finish", attempt=attempt_no)
+
     # 3. Servo is home! Spawn the HTTP/Level checking thread (Use 'local' as inference_id)
     Thread(target=process_levels_and_http, args=(target_bin, "local_fallback", attempt_no), daemon=True).start()
 
     # Log total pipeline for local fallback
     if last_detected_at is not None:
         total_pipeline_ms = (now() - last_detected_at) * 1000
-        log_profile("total_ai_pipeline_main_thread", total_pipeline_ms, {"label": target_bin, "attempt": attempt_no})
+        log_profile(
+            "total_ai_pipeline_main_thread",
+            total_pipeline_ms,
+            {"label": target_bin, "attempt": attempt_no},
+            attempt=attempt_no
+        )
 
     # 4. Unlock the event immediately for the next item
     capture_event.clear()
@@ -133,17 +155,22 @@ def camera_capture():
 
     capture_event.set()
     print("[CAMERA] Capturing image...")
+    log_cpu_usage("before_get_frame", attempt=attempt_no)
 
-    with profile_block("get_frame", extra={"attempt": attempt_no}):
+    with profile_block("get_frame", extra={"attempt": attempt_no}, attempt=attempt_no):
         ret, frame = get_frame()
+
+    log_cpu_usage("after_get_frame", attempt=attempt_no)
 
     if not ret:
         print("[ERROR] Could not capture frame")
         capture_event.clear()
         return
 
-    with profile_block("encode_image", extra={"attempt": attempt_no}):
+    with profile_block("encode_image", extra={"attempt": attempt_no}, attempt=attempt_no):
         success, buffer = cv2.imencode('.jpg', frame)
+
+    log_cpu_usage("after_encode_image", attempt=attempt_no)
 
     if not success:
         print("[ERROR] Failed to encode image")
@@ -170,7 +197,8 @@ def camera_capture():
             "image": image_bytes.hex()
         }
 
-        with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
+        log_cpu_usage("before_mqtt_publish_and_wait", attempt=attempt_no)
+        with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}, attempt=attempt_no):
             mqtt_publisher.send_image(json.dumps(message), qos=1)
 
             if inference_event.wait(timeout=3):  # wait up to 3s for MQTT response
@@ -181,6 +209,7 @@ def camera_capture():
                 else:
                     print("[PIPE] MQTT returned empty label, falling through...")
                     result = None
+        log_cpu_usage("after_mqtt_publish_and_wait", attempt=attempt_no)
     else:
         print("[PIPE] MQTT disabled, skipping MQTT stage...")
 
@@ -190,8 +219,12 @@ def camera_capture():
     if result is None:
         print("[PIPE] MQTT failed/skipped, trying Local AI...")
         try:
-            with profile_block("local_ai_inference", extra={"attempt": attempt_no}):
+            log_cpu_usage("before_local_ai_inference", attempt=attempt_no)
+
+            with profile_block("local_ai_inference", extra={"attempt": attempt_no}, attempt=attempt_no):
                 result = ai_vision.infer_frame(frame)
+
+            log_cpu_usage("after_local_ai_inference", attempt=attempt_no)
 
             if result:
                 print(f"[PIPE] Local AI succeeded: {result}")
@@ -209,8 +242,12 @@ def camera_capture():
     if result is None:
         print("[PIPE] Local AI failed, trying Cloud...")
         try:
-            with profile_block("cloud_ai_inference", extra={"attempt": attempt_no}):
+            log_cpu_usage("before_cloud_ai_inference", attempt=attempt_no)
+
+            with profile_block("cloud_ai_inference", extra={"attempt": attempt_no}, attempt=attempt_no):
                 result = send_image_cloud(image_bytes)
+
+            log_cpu_usage("after_cloud_ai_inference", attempt=attempt_no)
 
             if result:
                 print(f"[PIPE] Cloud succeeded: {result}")
@@ -224,6 +261,8 @@ def camera_capture():
     # ======================
     # 4. HANDLE RESULT OR GIVE UP
     # ======================
+    log_cpu_usage("before_handle_final_result", attempt=attempt_no)
+
     if result:
         handle_final_result(result, inference_id)
     else:
@@ -342,40 +381,52 @@ def handle_inference_result(msg):
 # MARK: STEP 3: MOVE SERVOS
 def handle_final_result(result, inference_id):
     global last_detected_at, attempt_no
-    
+
     print("[FINAL RESULT]:", result)
     print("[FINAL]: DONE BY:", inference_id)
-    
+
     # Calculate inference time
     if last_detected_at is not None:
         detect_to_infer_done_ms = (now() - last_detected_at) * 1000
         print(f"[PROFILE] detect_to_infer_done: {detect_to_infer_done_ms:.2f} ms")
-        log_profile("detect_to_infer_done", detect_to_infer_done_ms, {"label": result, "attempt": attempt_no, "source": inference_id})
-    
+        log_profile(
+            "detect_to_infer_done",
+            detect_to_infer_done_ms,
+            {"label": result, "attempt": attempt_no, "source": inference_id},
+            attempt=attempt_no
+        )
+
     # 1. Start the sorting sequence
-    with profile_block("route_decision", extra={"label": result, "attempt": attempt_no}):
+    with profile_block("route_decision", extra={"label": result, "attempt": attempt_no}, attempt=attempt_no):
         if result.lower() == "plastic":
             angle = 90
         elif result.lower() == "paper":
             angle = 180
         else:
             angle = 0
-            
-    with profile_block("servo_thread_start", extra={"label": result, "target": angle, "attempt": attempt_no}):
+
+    with profile_block("servo_thread_start", extra={"label": result, "target": angle, "attempt": attempt_no}, attempt=attempt_no):
         Thread(target=hardware.run_sequence, args=(angle,), daemon=True).start()
 
     # 2. Wait for the hardware sequence to finish (servo drops item and returns home)
+    log_cpu_usage("before_wait_for_servo_finish", attempt=attempt_no)
     sleep(0.1) # Brief pause to ensure the hardware thread acquires the lock first
-    hardware.seq_lock.acquire() 
-    hardware.seq_lock.release() 
-    
+    hardware.seq_lock.acquire()
+    hardware.seq_lock.release()
+    log_cpu_usage("after_wait_for_servo_finish", attempt=attempt_no)
+
     # 3. Servo is home! Spawn the HTTP/Level checking thread
     Thread(target=process_levels_and_http, args=(result, inference_id, attempt_no), daemon=True).start()
 
     # Log total main-thread pipeline time
     if last_detected_at is not None:
         total_pipeline_ms = (now() - last_detected_at) * 1000
-        log_profile("total_ai_pipeline_main_thread", total_pipeline_ms, {"label": result, "attempt": attempt_no})
+        log_profile(
+            "total_ai_pipeline_main_thread",
+            total_pipeline_ms,
+            {"label": result, "attempt": attempt_no},
+            attempt=attempt_no
+        )
 
     # 4. Instantly clear the capture event so monitor_detection can find the next item
     capture_event.clear()
@@ -514,12 +565,12 @@ prev_distance = None
 # SMALL RAW SENSOR CHECKS
 # ================================
 @profile_cpu
-def ultrasonic_check():
+def ultrasonic_check(attempt=None):
     distance = hardware.read_ultrasonic_sensor('d')
     return distance
 
 @profile_cpu
-def camera_trigger_check():
+def camera_trigger_check(attempt=None):
     start_fallback_camera()   # ensure fallback camera is active
     detected = camera_detects_object()
     return detected
@@ -535,7 +586,7 @@ def update_ultra_history(distance):
 # MODE-LEVEL MONITORING CYCLES
 # ================================
 @profile_cpu
-def ultrasonic_monitor_cycle():
+def ultrasonic_monitor_cycle(attempt=None):
     """
     One full ultrasonic monitoring cycle.
     Includes:
@@ -559,7 +610,7 @@ def ultrasonic_monitor_cycle():
     healthy = False
 
     try:
-        distance = ultrasonic_check()
+        distance = ultrasonic_check(attempt=attempt)
         update_ultra_history(distance)
     except Exception as e:
         print(f"[ERROR] Sensor read failed: {e}")
@@ -591,7 +642,9 @@ def ultrasonic_monitor_cycle():
             attempt_no += 1
             last_detected_at = now()
             print(f"\n[DETECT] Attempt {attempt_no}: Triggered at {round(distance, 1)} cm")
+            log_cpu_usage("before_camera_capture_from_ultrasonic_mode", attempt=attempt_no)
             camera_capture()
+            log_cpu_usage("after_camera_capture_from_ultrasonic_mode", attempt=attempt_no)
             sleep(2)  # cooldown
 
         prev_distance = distance
@@ -606,7 +659,7 @@ def ultrasonic_monitor_cycle():
 
 
 @profile_cpu
-def camera_monitor_cycle():
+def camera_monitor_cycle(attempt=None):
     """
     One full camera-based monitoring cycle.
     Includes:
@@ -626,7 +679,7 @@ def camera_monitor_cycle():
     healthy = False
 
     try:
-        triggered = camera_trigger_check()
+        triggered = camera_trigger_check(attempt=attempt)
     except Exception as e:
         print(f"[ERROR] Camera trigger check failed: {e}")
         triggered = False
@@ -644,7 +697,9 @@ def camera_monitor_cycle():
         attempt_no += 1
         last_detected_at = now()
         print(f"[📷] Attempt {attempt_no}: Fallback camera detected object!")
+        log_cpu_usage("before_camera_capture_from_camera_fallback_mode", attempt=attempt_no)
         camera_capture()
+        log_cpu_usage("after_camera_capture_from_camera_fallback_mode", attempt=attempt_no)
         sleep(2)  # cooldown
 
     if healthy:
@@ -662,7 +717,7 @@ def camera_monitor_cycle():
 # MARK: STEP 1: Monitor detection
 def monitor_detection():
     global attempt_no, last_detected_at, ultra_history, prev_distance
-    
+
     state = DetectState.ULTRASONIC
     fail_count = 0
     last_retry_time = 0
@@ -684,7 +739,7 @@ def monitor_detection():
         # STATE: ULTRASONIC
         # =========================
         if state == DetectState.ULTRASONIC:
-            result = ultrasonic_monitor_cycle()
+            result = ultrasonic_monitor_cycle(attempt=attempt_no + 1)
 
             if not result["healthy"]:
                 fail_count += result["fail_increment"]
@@ -702,7 +757,7 @@ def monitor_detection():
         # STATE: CAMERA FALLBACK
         # =========================
         elif state == DetectState.CAMERA_FALLBACK:
-            result = camera_monitor_cycle()
+            result = camera_monitor_cycle(attempt=attempt_no + 1)
 
             if result["next_state"] == DetectState.ULTRASONIC:
                 state = DetectState.ULTRASONIC
@@ -712,7 +767,7 @@ def monitor_detection():
 
 # MARK: ULTRASONIC ONLY
 @profile_cpu
-def ultrasonic_trigger_monitor_cycle():
+def ultrasonic_trigger_monitor_cycle(attempt=None):
     """
     One pure ultrasonic-trigger monitoring cycle.
     No fallback logic.
@@ -729,7 +784,7 @@ def ultrasonic_trigger_monitor_cycle():
     triggered = False
 
     try:
-        distance = ultrasonic_check()
+        distance = ultrasonic_check(attempt=attempt)
         update_ultra_history(distance)
     except Exception as e:
         print(f"[ERROR] Ultrasonic read failed: {e}")
@@ -765,7 +820,7 @@ def monitor_detection_ultrasonic_only():
             sleep(0.1)
             continue
 
-        result = ultrasonic_trigger_monitor_cycle()
+        result = ultrasonic_trigger_monitor_cycle(attempt=attempt_no + 1)
 
         if result["triggered"]:
             attempt_no += 1
@@ -777,16 +832,18 @@ def monitor_detection_ultrasonic_only():
             else:
                 print(f"\n[DETECT-ULTRA] Attempt {attempt_no}: Triggered")
 
+            log_cpu_usage("before_camera_capture_ultrasonic_only", attempt=attempt_no)
             camera_capture()   # same downstream pipeline
+            log_cpu_usage("after_camera_capture_ultrasonic_only", attempt=attempt_no)
             sleep(2)           # cooldown to avoid duplicate trigger
 
         sleep(0.1)
 
 # MARK: CAMERA ONLY
 @profile_cpu
-def pure_camera_monitor_cycle():
+def pure_camera_monitor_cycle(attempt=None):
     try:
-        triggered = camera_trigger_check()
+        triggered = camera_trigger_check(attempt=attempt)
     except Exception as e:
         print(f"[ERROR] Camera trigger check failed: {e}")
         triggered = False
@@ -801,15 +858,17 @@ def monitor_detection_camera_only():
             sleep(0.1)
             continue
 
-        result = pure_camera_monitor_cycle()
+        result = pure_camera_monitor_cycle(attempt=attempt_no + 1)
 
         if result["triggered"]:
             attempt_no += 1
             last_detected_at = now()
             print(f"[📷] Attempt {attempt_no}: Camera-only mode detected object!")
-            log_cpu_usage("\nbefore camera capture!")
+
+            log_cpu_usage("before_camera_capture_camera_only", attempt=attempt_no)
             camera_capture()
-            log_cpu_usage("after camera capture!\n")
+            log_cpu_usage("after_camera_capture_camera_only", attempt=attempt_no)
+
             sleep(2)
 
         sleep(0.1)

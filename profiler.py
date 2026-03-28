@@ -104,7 +104,7 @@ def _stringify_extra(extra):
 # SYSTEM / PROCESS CPU USAGE LOGGER
 # ============================================================
 
-def log_cpu_usage(stage=""):
+def log_cpu_usage(stage="", attempt=None):
     """
     Log current system CPU usage, process CPU usage, and memory usage.
 
@@ -120,6 +120,7 @@ def log_cpu_usage(stage=""):
     row = [
         time.strftime("%Y-%m-%d %H:%M:%S"),       # human-readable timestamp
         threading.current_thread().name,          # which thread logged this
+        attempt,                                  # attempt / round number
         stage,                                    # label / stage name
         round(system_cpu, 2),                     # total machine CPU %
         round(process_cpu, 2),                    # this Python process CPU %
@@ -128,12 +129,12 @@ def log_cpu_usage(stage=""):
 
     append_csv_row(
         CPU_USAGE_LOG,
-        ["timestamp", "thread", "stage", "system_cpu_percent", "process_cpu_percent", "memory_percent"],
+        ["timestamp", "thread", "attempt", "stage", "system_cpu_percent", "process_cpu_percent", "memory_percent"],
         row
     )
 
     print(
-        f"[CPU] {stage} | "
+        f"[CPU] attempt={attempt} | {stage} | "
         f"system={system_cpu:.1f}% | "
         f"process={process_cpu:.1f}% | "
         f"mem={memory_percent:.2f}%"
@@ -155,6 +156,8 @@ def profile_cpu(func):
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
+        attempt = kwargs.get("attempt", None)
+
         cpu_start = time.process_time()
         wall_start = time.perf_counter()
 
@@ -169,6 +172,7 @@ def profile_cpu(func):
         row = [
             time.strftime("%Y-%m-%d %H:%M:%S"),   # human-readable timestamp
             threading.current_thread().name,      # thread name
+            attempt,                              # attempt / round number
             func.__name__,                        # function name
             round(cpu_ms, 2),                     # CPU time in ms
             round(wall_ms, 2),                    # real elapsed time in ms
@@ -176,11 +180,11 @@ def profile_cpu(func):
 
         append_csv_row(
             CPU_FUNC_LOG,
-            ["timestamp", "thread", "function", "cpu_ms", "wall_ms"],
+            ["timestamp", "thread", "attempt", "function", "cpu_ms", "wall_ms"],
             row
         )
 
-        print(f"[CPU] {func.__name__}: {cpu_ms:.2f} ms CPU, {wall_ms:.2f} ms wall")
+        print(f"[CPU] attempt={attempt} | {func.__name__}: {cpu_ms:.2f} ms CPU, {wall_ms:.2f} ms wall")
         return result
 
     return wrapper
@@ -190,7 +194,7 @@ def profile_cpu(func):
 # GENERIC STAGE / BLOCK PROFILING LOGGER
 # ============================================================
 
-def log_profile(stage, duration_ms, extra=None):
+def log_profile(stage, duration_ms, extra=None, attempt=None):
     """
     Write one profiling row into logs/profile_log.csv
 
@@ -198,10 +202,12 @@ def log_profile(stage, duration_ms, extra=None):
     - stage: name of the block / stage
     - duration_ms: elapsed time in milliseconds
     - extra: optional metadata (dict or string)
+    - attempt: detection round number
     """
     row = [
         time.strftime("%Y-%m-%d %H:%M:%S"),       # timestamp
         threading.current_thread().name,          # thread
+        attempt,                                  # attempt / round number
         stage,                                    # stage name
         round(duration_ms, 2),                    # duration in ms
         _stringify_extra(extra),                  # extra info
@@ -209,18 +215,18 @@ def log_profile(stage, duration_ms, extra=None):
 
     append_csv_row(
         PROFILE_LOG,
-        ["timestamp", "thread", "stage", "duration_ms", "extra"],
+        ["timestamp", "thread", "attempt", "stage", "duration_ms", "extra"],
         row
     )
 
 
 @contextmanager
-def profile_block(name, extra=None):
+def profile_block(name, extra=None, attempt=None):
     """
     Context manager for profiling a code block.
 
     Example:
-        with profile_block("camera_read", extra={"attempt": 1}):
+        with profile_block("camera_read", extra={"attempt": 1}, attempt=1):
             ret, frame = cap.read()
 
     This will:
@@ -233,8 +239,8 @@ def profile_block(name, extra=None):
         yield
     finally:
         duration_ms = (now() - start) * 1000
-        print(f"[PROFILE] {name}: {duration_ms:.2f} ms")
-        log_profile(name, duration_ms, extra)
+        print(f"[PROFILE] attempt={attempt} | {name}: {duration_ms:.2f} ms")
+        log_profile(name, duration_ms, extra, attempt=attempt)
 
 
 # ============================================================
@@ -250,17 +256,17 @@ def init_logs():
 
     ensure_csv_header(
         PROFILE_LOG,
-        ["timestamp", "thread", "stage", "duration_ms", "extra"]
+        ["timestamp", "thread", "attempt", "stage", "duration_ms", "extra"]
     )
 
     ensure_csv_header(
         CPU_USAGE_LOG,
-        ["timestamp", "thread", "stage", "system_cpu_percent", "process_cpu_percent", "memory_percent"]
+        ["timestamp", "thread", "attempt", "stage", "system_cpu_percent", "process_cpu_percent", "memory_percent"]
     )
 
     ensure_csv_header(
         CPU_FUNC_LOG,
-        ["timestamp", "thread", "function", "cpu_ms", "wall_ms"]
+        ["timestamp", "thread", "attempt", "function", "cpu_ms", "wall_ms"]
     )
 
 
