@@ -125,18 +125,18 @@ def process_ai_detection():
 # ================================
 def camera_capture():
     global current_request_id, attempt_no
-    
+
     # Prevent concurrent captures
     if capture_event.is_set():
         print("[CAMERA] Already processing, skipping.")
         return
-    
+
     capture_event.set()
     print("[CAMERA] Capturing image...")
 
     with profile_block("get_frame", extra={"attempt": attempt_no}):
         ret, frame = get_frame()
-        
+
     if not ret:
         print("[ERROR] Could not capture frame")
         capture_event.clear()
@@ -144,7 +144,7 @@ def camera_capture():
 
     with profile_block("encode_image", extra={"attempt": attempt_no}):
         success, buffer = cv2.imencode('.jpg', frame)
-        
+
     if not success:
         print("[ERROR] Failed to encode image")
         capture_event.clear()
@@ -156,14 +156,14 @@ def camera_capture():
     # Reset MQTT inference state
     inference_event.clear()
     inference_result["label"] = None
-    
-    inference_id = None # to check who did inference
+
+    inference_id = None
     result = None
 
     # ======================
-    # 1. TRY MQTT (blocking wait)
+    # 1. TRY MQTT (only if enabled)
     # ======================
-    if USE_MQTT:        
+    if USE_MQTT and mqtt_publisher is not None:
         print("[PIPE] Sending via MQTT, waiting for result...")
         message = {
             "id": current_request_id,
@@ -173,7 +173,7 @@ def camera_capture():
         with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
             mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-            if inference_event.wait(timeout=3):  # block here in SECONDS until MQTT responds or times out
+            if inference_event.wait(timeout=3):  # wait up to 3s for MQTT response
                 result = inference_result["label"]
                 if result:
                     print(f"[PIPE] MQTT succeeded: {result}")
@@ -183,62 +183,52 @@ def camera_capture():
                     result = None
     else:
         print("[PIPE] MQTT disabled, skipping MQTT stage...")
-        with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
-            mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-            if inference_event.wait(timeout=3):  # block here in SECONDS until MQTT responds or times out
-                result = inference_result["label"]
-                if result:
-                    print(f"[PIPE] MQTT succeeded: {result}")
-                    inference_id = "mqtt"
-                else:
-                    print("[PIPE] MQTT returned empty label, falling through...")
-                    result = None
+    # ======================
+    # 2. TRY LOCAL AI (if MQTT failed or was skipped)
+    # ======================
+    if result is None:
+        print("[PIPE] MQTT failed/skipped, trying Local AI...")
+        try:
+            with profile_block("local_ai_inference", extra={"attempt": attempt_no}):
+                result = ai_vision.infer_frame(frame)
 
-        # ======================
-        # 2. TRY LOCAL AI (only if MQTT failed)
-        # ======================
-        if result is None:
-            print("[PIPE] MQTT failed ? trying Local AI...")
-            try:
-                with profile_block("local_ai_inference", extra={"attempt": attempt_no}):
-                    result = ai_vision.infer_frame(frame)  # assumed blocking
-                if result:
-                    print(f"[PIPE] Local AI succeeded: {result}")
-                    inference_id = "local"
-                else:
-                    print("[PIPE] Local AI returned None, falling through...")
-                    result = None
-            except Exception as e:
-                print(f"[PIPE] Local AI failed: {e}")
+            if result:
+                print(f"[PIPE] Local AI succeeded: {result}")
+                inference_id = "local"
+            else:
+                print("[PIPE] Local AI returned None, falling through...")
                 result = None
+        except Exception as e:
+            print(f"[PIPE] Local AI failed: {e}")
+            result = None
 
-        # ======================
-        # 3. TRY CLOUD (only if local also failed)
-        # ======================
-        if result is None:
-            print("[PIPE] Local AI failed ? trying Cloud...")
-            try:
-                with profile_block("cloud_ai_inference", extra={"attempt": attempt_no}):
-                    result = send_image_cloud(image_bytes)
-                if result:
-                    print(f"[PIPE] Cloud succeeded: {result}")
-                    inference_id = "cloud"
-                else:
-                    print("[PIPE] Cloud returned None.")
-            except Exception as e:
-                print(f"[PIPE] Cloud failed: {e}")
-                result = None
+    # ======================
+    # 3. TRY CLOUD (if local also failed)
+    # ======================
+    if result is None:
+        print("[PIPE] Local AI failed, trying Cloud...")
+        try:
+            with profile_block("cloud_ai_inference", extra={"attempt": attempt_no}):
+                result = send_image_cloud(image_bytes)
 
-        # ======================
-        # 4. HANDLE RESULT OR GIVE UP
-        # ======================
-        if result: # GO TO STEP 3: Moving Servos
-            handle_final_result(result, inference_id)
-        else:
-            print("[PIPE] ALL SOURCES FAILED, no action taken.")
-            capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
+            if result:
+                print(f"[PIPE] Cloud succeeded: {result}")
+                inference_id = "cloud"
+            else:
+                print("[PIPE] Cloud returned None.")
+        except Exception as e:
+            print(f"[PIPE] Cloud failed: {e}")
+            result = None
 
+    # ======================
+    # 4. HANDLE RESULT OR GIVE UP
+    # ======================
+    if result:
+        handle_final_result(result, inference_id)
+    else:
+        print("[PIPE] ALL SOURCES FAILED, no action taken.")
+        capture_event.clear()
     
 # ================================
 # SEND HTTP REQUEST I THINK
