@@ -116,7 +116,7 @@ def process_ai_detection():
     capture_event.clear()
 
 # ================================
-# CAMERA CAPTURE & MQTT SENDING
+# MARK: STEP 2: CAMERA CAPTURE & MQTT SENDING + AI INFERENCE
 # ================================
 def camera_capture():
     global current_request_id, attempt_no
@@ -167,7 +167,7 @@ def camera_capture():
     with profile_block("mqtt_publish_and_wait", extra={"attempt": attempt_no}):
         mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-        if inference_event.wait(timeout=3):  # block here until MQTT responds or times out
+        if inference_event.wait(timeout=3):  # block here in SECONDS until MQTT responds or times out
             result = inference_result["label"]
             if result:
                 print(f"[PIPE] MQTT succeeded: {result}")
@@ -214,7 +214,7 @@ def camera_capture():
     # ======================
     # 4. HANDLE RESULT OR GIVE UP
     # ======================
-    if result:
+    if result: # GO TO STEP 3: Moving Servos
         handle_final_result(result, inference_id)
     else:
         print("[PIPE] ALL SOURCES FAILED, no action taken.")
@@ -330,6 +330,7 @@ def handle_inference_result(msg):
     inference_result["label"] = label
     inference_event.set()
     
+# MARK: STEP 3: MOVE SERVOS
 def handle_final_result(result, inference_id):
     global last_detected_at, attempt_no
     
@@ -374,16 +375,67 @@ def handle_final_result(result, inference_id):
 # ================================
 # DISTANCE MONITOR
 # ================================
-ultra_history = []
-ULTRA_HISTORY_SIZE = 5
+# ultra_history = []
+# ULTRA_HISTORY_SIZE = 5
 
-def is_ultrasonic_healthy(distance):
-    # Update logic here to properly return True/False based on your needs
-    return False
+# def is_ultrasonic_healthy(distance):
+#     """
+#     Returns True if the ultrasonic sensor appears healthy,
+#     False if readings look broken / unstable / stuck.
+#     Uses the recent ultra_history values.
+#     """
+#     global ultra_history
 
+#     # 1. Reject obvious invalid current reading
+#     if distance is None:
+#         return False
+
+#     # Adjust these based on your real sensor range
+#     MIN_VALID_CM = 2
+#     MAX_VALID_CM = 400
+
+#     if not (MIN_VALID_CM <= distance <= MAX_VALID_CM):
+#         return False
+
+#     # 2. Need enough samples before judging health
+#     if len(ultra_history) < ULTRA_HISTORY_SIZE:
+#         return True
+
+#     recent = ultra_history[-ULTRA_HISTORY_SIZE:]
+
+#     # 3. Too many invalid values in recent history
+#     invalid_count = sum(
+#         1 for d in recent
+#         if d is None or d < MIN_VALID_CM or d > MAX_VALID_CM
+#     )
+#     if invalid_count >= 3:
+#         return False
+
+#     # Keep only valid values for further checks
+#     valid_recent = [d for d in recent if d is not None and MIN_VALID_CM <= d <= MAX_VALID_CM]
+
+#     if len(valid_recent) < 3:
+#         return False
+
+#     # 4. Check if sensor is wildly unstable
+#     spread = max(valid_recent) - min(valid_recent)
+#     if spread > 100:   # very large random jumps = suspicious
+#         return False
+
+#     # 5. Check if sensor is "stuck" on exactly the same value
+#     # (common symptom of bad / frozen readings)
+#     rounded = [round(d, 1) for d in valid_recent]
+#     if len(set(rounded)) == 1:
+#         return False
+
+#     return True
+
+
+# MARK: CAM SETUP = = =
 fallback_cap = None
 prev_frame = None
 
+# get current frame
 def get_frame():
     global fallback_cap
 
@@ -404,12 +456,14 @@ def get_frame():
 
     return ret, frame
 
+# start camera code
 def start_fallback_camera():
     global fallback_cap
     if fallback_cap is None:
         print("[FALLBACK] Starting camera...")
         fallback_cap = cv2.VideoCapture(0)
 
+# stop camera code
 def stop_fallback_camera():
     global fallback_cap, prev_frame
     if fallback_cap:
@@ -418,6 +472,7 @@ def stop_fallback_camera():
         fallback_cap = None
     prev_frame = None
 
+# camera detect movement
 def camera_detects_object():
     global fallback_cap, prev_frame
 
@@ -443,20 +498,20 @@ def camera_detects_object():
 
     return motion > 300000  # tune this
 
-from enum import Enum
+# from enum import Enum
+# class DetectState(Enum):
+#     ULTRASONIC = 1
+#     CAMERA_FALLBACK = 2
 
-class DetectState(Enum):
-    ULTRASONIC = 1
-    CAMERA_FALLBACK = 2
+# ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger fallback
+# prev_distance = None
 
-ULTRASONIC_FAIL_THRESHOLD = 5  # number of consecutive bad readings to trigger fallback
-prev_distance = None
-
+# MARK: STEP 1: Monitor detection
 def monitor_detection():
     global attempt_no, last_detected_at, ultra_history
     
-    state = DetectState.CAMERA_FALLBACK
-    fail_count = 0
+    # state = DetectState.ULTRASONIC
+    # fail_count = 0
     last_retry_time = 0
 
     while SYSTEM_RUNNING:
@@ -464,94 +519,107 @@ def monitor_detection():
             resend_offline_logs() # attempt to send any failed logs every 10 seconds
             last_retry_time = time()
 
+        # do nothing, if the system is already busy (ie. while the servo is still moving, or image being processed)
         if hardware.seq_lock.locked() or capture_event.is_set():
             sleep(0.1)
             continue
-
-        distance = None
-        # =========================
-        # READ ULTRASONIC (UPDATED)
-        # =========================
-        try:
-            distance = hardware.read_ultrasonic_sensor('d') 
-            
-            if distance is not None:
-                ultra_history.append(round(distance, 1))
-                if len(ultra_history) > ULTRA_HISTORY_SIZE:
-                    ultra_history.pop(0)
-        except Exception as e:
-            print(f"[ERROR] Sensor read failed: {e}")
-
-        # Force False right now based on your current setup for testing fallback
-        healthy = False
-
-        # =========================
-        # STATE: ULTRASONIC
-        # =========================
-        if state == DetectState.ULTRASONIC:
-            if not healthy:
-                fail_count += 1
-                print(f"[⚠️] Ultrasonic unhealthy ({fail_count}/{ULTRASONIC_FAIL_THRESHOLD})")
-                if fail_count >= ULTRASONIC_FAIL_THRESHOLD:
-                    print("[⚠️] Confirmed failure -> switching to CAMERA fallback")
-                    start_fallback_camera()
-                    state = DetectState.CAMERA_FALLBACK
-                    fail_count = 0
-            else:
-                fail_count = 0  # reset on any good reading
-
-            global prev_distance
-            print(f"prev distance: {prev_distance}")
-            if distance:
-                triggered = False
-
-                # 1. Standard threshold (Is an object physically close?)
-                if 0 < distance <= config.DETECT_THRESHOLD:
-                    triggered = True
-
-                # 2. Sudden drop detection (Did an object suddenly appear?)
-                if prev_distance is not None:
-                    delta = prev_distance - distance
-                            
-                    # Trigger only if distance SHRINKS by more than 10cm instantly
-                    if delta > 10: 
-                        print(f"[DEBUG] Sudden drop detected: {round(delta,1)} cm")
-                        triggered = True
-
-                if triggered:
-                    attempt_no += 1
-                    last_detected_at = now()
-                    print(f"\n[DETECT] Attempt {attempt_no}: Triggered at {round(distance,1)} cm")
-                    camera_capture()
-                    sleep(2)
-                
-                prev_distance = distance
-
-        # =========================
-        # STATE: CAMERA FALLBACK
-        # =========================
-        elif state == DetectState.CAMERA_FALLBACK:
+        
+        with profile_block("camera startup time"):
             start_fallback_camera() # Ensure camera is started
-            
-            if camera_detects_object():
-                attempt_no += 1
-                last_detected_at = now()
-                print(f"[📷] Attempt {attempt_no}: Fallback camera detected object!")
-                camera_capture()
-                sleep(2)
+        
+        if camera_detects_object():
+            attempt_no += 1
+            last_detected_at = now()
+            print(f"[📷] Attempt {attempt_no}: Fallback camera detected object!")
+            camera_capture() # GO TO STEP 2: capture and detect image
+            sleep(2)
 
-            # Try recovery
-            if healthy:
-                print("[🔄] Ultrasonic recovering...")
-                stop_fallback_camera()
-                state = DetectState.ULTRASONIC
-                fail_count = 0
+        # distance = None # keep a note of the previous distance
+
+        # # =========================
+        # # READ ULTRASONIC (UPDATED)
+        # # =========================
+        # try:
+        #     distance = hardware.read_ultrasonic_sensor('d') # reading the ultrasonic sensor
+            
+        #     if distance is not None:
+        #         ultra_history.append(round(distance, 1))
+        #         if len(ultra_history) > ULTRA_HISTORY_SIZE:
+        #             ultra_history.pop(0)
+        # except Exception as e:
+        #     print(f"[ERROR] Sensor read failed: {e}")
+
+        # # Force False right now based on your current setup for testing fallback
+        # healthy = is_ultrasonic_healthy(distance)
+        # # healthy = True
+
+        # # =========================
+        # # STATE: ULTRASONIC
+        # # =========================
+        # if state == DetectState.ULTRASONIC:
+        #     if not healthy:
+        #         fail_count += 1
+        #         print(f"[⚠️] Ultrasonic unhealthy ({fail_count}/{ULTRASONIC_FAIL_THRESHOLD})")
+        #         if fail_count >= ULTRASONIC_FAIL_THRESHOLD:
+        #             print("[⚠️] Confirmed failure -> switching to CAMERA fallback")
+        #             start_fallback_camera()
+        #             state = DetectState.CAMERA_FALLBACK
+        #             fail_count = 0
+        #     else:
+        #         fail_count = 0  # reset on any good reading
+
+        #     global prev_distance
+        #     print(f"prev distance: {prev_distance}")
+        #     if distance:
+        #         triggered = False
+
+        #         # 1. Standard threshold (Is an object physically close?)
+        #         if 0 < distance <= config.DETECT_THRESHOLD:
+        #             triggered = True
+
+        #         # 2. Sudden drop detection (Did an object suddenly appear?)
+        #         if prev_distance is not None:
+        #             delta = prev_distance - distance
+                            
+        #             # Trigger only if distance SHRINKS by more than 10cm instantly
+        #             if delta > 10: 
+        #                 print(f"[DEBUG] Sudden drop detected: {round(delta,1)} cm")
+        #                 triggered = True
+
+        #         if triggered:
+        #             attempt_no += 1
+        #             last_detected_at = now()
+        #             print(f"\n[DETECT] Attempt {attempt_no}: Triggered at {round(distance,1)} cm")
+        #             camera_capture() # GO TO STEP 2: capture and detect image
+        #             sleep(2)
+                
+        #         prev_distance = distance
+
+        # # =========================
+        # # STATE: CAMERA FALLBACK
+        # # =========================
+        # elif state == DetectState.CAMERA_FALLBACK:
+        #     start_fallback_camera() # Ensure camera is started
+            
+        #     if camera_detects_object():
+        #         attempt_no += 1
+        #         last_detected_at = now()
+        #         print(f"[📷] Attempt {attempt_no}: Fallback camera detected object!")
+        #         camera_capture() # GO TO STEP 2: capture and detect image
+        #         sleep(2)
+
+        #     # Try recovery
+        #     if healthy:
+        #         print("[🔄] Ultrasonic recovering...")
+        #         stop_fallback_camera()
+        #         state = DetectState.ULTRASONIC
+        #         fail_count = 0
 
         sleep(0.1)
 
 
-mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
-#mqtt_publisher.subscribe_results(process_ai_detection) # for local
+# mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
+# mqtt_publisher.subscribe_results(process_ai_detection) # for local
 
 # ================================
 # START SYSTEM

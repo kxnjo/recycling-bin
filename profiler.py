@@ -5,7 +5,32 @@ import time
 from contextlib import contextmanager
 from functools import wraps
 
+# psutil
+import psutil
+import time
+import csv
+import os
+
+process = psutil.Process(os.getpid())
+
+# prime the counters once
+psutil.cpu_percent(interval=None)
+process.cpu_percent(interval=None)
+
 PROFILE_LOG = "profile_log.csv"
+
+def log_cpu_usage(stage=""):
+    system_cpu = psutil.cpu_percent(interval=None)
+    process_cpu = process.cpu_percent(interval=None)  # can exceed 100 on multi-core systems
+    memory_percent = process.memory_percent()
+
+    timestamp = time.time()
+
+    with open("cpu_usage_log.csv", "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([timestamp, stage, system_cpu, process_cpu, memory_percent])
+
+    print(f"[CPU] {stage} | system={system_cpu:.1f}% | process={process_cpu:.1f}% | mem={memory_percent:.2f}%")
 
 
 def now() -> float:
