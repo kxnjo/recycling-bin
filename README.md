@@ -37,7 +37,6 @@ recycling-bin
 ├── ai_vision.py                ← Model Inference functions
 ├── pi_2_main.py                ← Pi #2 execution code 
 ├── dashboard-backend.py        ← Dashboard Flask Backend
-
 └── http_controller.py          ← HTTP handler to send information to dashboard
 ```
 
