@@ -59,7 +59,7 @@ Searching for labelled data for waste and perform training on YOLO and MobileNet
 ### Phase 2: Hardware Setup
 Physical connections of the different sensors with the Raspberry Pi.
 
-![Pi Pin Setup](pins.png)
+![Pi Pin Setup](pins.jpg)
 
 ### Phase 3: Dashboard Development
 Developing a user-friendly dashboard (Using React and Flask) that can is easy to use and contains useful information for necessary actions if required, and host it on the cloud.
