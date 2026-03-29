@@ -12,6 +12,7 @@ import config
 import numpy as np
 
 model = None 
+model_type = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def init_model():
@@ -23,10 +24,12 @@ def init_model():
     
     if "yolo" in path_lower:
         print(f"Loading YOLO model from {config.MODEL_PATH}...")
+        model_type = "yolo"
         model = YOLO(config.MODEL_PATH)
         
     elif "mobilenet" in path_lower:
         print(f"Loading MobileNetV3 model from {config.MODEL_PATH}...")
+        model_type = "mobilenet"
         
         model = models.mobilenet_v3_small(num_classes=len(MOBILENET_CLASSES))
         
@@ -223,6 +226,9 @@ def infer(frame=None, image_bytes=None):
         except:
             print("[ERROR] Model not loaded")
             return "general"
+        
+    predicted_class = "None"
+    confidence = 0.0
 
     # Get frame from whichever source was provided
     if frame is None and image_bytes is not None:
@@ -239,29 +245,42 @@ def infer(frame=None, image_bytes=None):
     # Grab the resolution from config
     res = config.INFERENCE_RES
     
-    start_time = time.time()
-    results = model(img_path, imgsz=res, verbose=False)
-    end_time = time.time()
-
-    latency_ms = (end_time - start_time) * 1000
-    fps = 1000 / latency_ms if latency_ms > 0 else 0
+    if model_type == "yolo":
+            results = model(frame, imgsz=config.INFERENCE_RES, verbose=False)
+            
+    elif model_type == "mobilenet":
+        transform = transforms.Compose([
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        
+        color_converted = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        pil_image = Image.fromarray(color_converted)
+        input_tensor = transform(pil_image).unsqueeze(0).to(device)
+        
+        with torch.no_grad():
+            outputs = model(input_tensor)
 
     # --- CLASSIFICATION EXTRACTION ---
-    # Classification models return probabilities (.probs) instead of bounding boxes (.boxes)
-    result = results[0]
-    predicted_class = "None"
-    confidence = 0.0
+    if model_type == "yolo":
+        # Classification models return probabilities (.probs) instead of bounding boxes (.boxes)
+        result = results[0]
+        predicted_class = "None"
+        confidence = 0.0
 
-    if result.probs is not None:
-        top1_index = result.probs.top1  # Get the index of the highest probability prediction
-        confidence = result.probs.top1conf.item()  # Get the confidence score (0.0 to 1.0)
-        predicted_class = model.names[top1_index]  # Translate index to your custom class name
-
-    # Clean benchmark-style output
-    # print(f"\n{'Model':<15} {'Resolution':<12} {'Latency (ms)':<18} {'FPS':<8}")
-    # print("-" * 65)
-    # print(f"{'Custom YOLO-cls':<15} {f'{res[0]}x{res[1]}':<12} {latency_ms:<18.2f} {fps:<8.2f}\n")
-    # print(f"Prediction: {predicted_class.upper()} (Confidence: {confidence:.1%})")
+        if result.probs is not None:
+            top1_index = result.probs.top1  # Get the index of the highest probability prediction
+            confidence = result.probs.top1conf.item()  # Get the confidence score (0.0 to 1.0)
+            predicted_class = model.names[top1_index]  # Translate index to your custom class name
+        elif model_type == "mobilenet":
+            # Convert raw outputs to probabilities (0.0 to 1.0) for confidence score
+            probabilities = torch.nn.functional.softmax(outputs[0], dim=0)
+            conf_tensor, predicted_idx = torch.max(probabilities, 0)
+            
+            confidence = conf_tensor.item()
+            predicted_class = MOBILENET_CLASSES[predicted_idx.item()]
 
     # --- DIRECT ROUTING LOGIC ---
     bin_choice = "general" 
