@@ -1,7 +1,7 @@
 # config.py
 
 # --- AI CONFIGURATION ---
-MODEL_PATH = "model/yolo_2_best_50epoch.pt" 
+MODEL_PATH = "model/mobilenetv3_best.pt" 
 INFERENCE_RES = (320, 320) # Set this to the resolution that gave you the best FPS in the benchmark
 
 # --- SENSOR CONFIGURATION ---
