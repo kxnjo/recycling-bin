@@ -27,6 +27,8 @@ import requests
 import uuid
 import json
 
+import http_controller
+
 inference_event = Event()
 inference_result = {"label": None}
 current_request_id = None  
@@ -60,37 +62,9 @@ def process_levels_and_http(label, inference_id):
     bin_levels['inference_id'] = inference_id
     
     print("[BACKGROUND THREAD] Sending data to Manager Pi / Cloud...")
-    send_bin_levels_http(bin_levels)
+    http_controller.send_bin_levels_http(bin_levels)
     print("[BACKGROUND THREAD] Update complete.")
 
-
-# ================================
-# AI ROUTING THIS IS FOR LOCAL DETECTION IF PI 2 DIED
-# ================================
-def process_ai_detection():
-    # 1. Take picture and get result from ai_vision module
-    ai_vision.init_model()  # Load model before first inference
-    target_bin = ai_vision.capture_and_infer()
-
-    # 2. Trigger hardware based on result
-    print(f"[ACTION] Routing item to {target_bin.upper()} bin...")
-    if target_bin.lower() == "plastic":
-        Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
-    elif target_bin.lower() == "paper":
-        Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
-    else: # general
-        Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
-
-    # Wait for the hardware sequence to finish
-    sleep(0.1)
-    hardware.seq_lock.acquire()  
-    hardware.seq_lock.release()
-    
-    # 3. Servo is home! Spawn the HTTP/Level checking thread (Use 'local' as inference_id)
-    Thread(target=process_levels_and_http, args=(target_bin, "local_fallback"), daemon=True).start()
-
-    # 4. Unlock the event immediately for the next item
-    capture_event.clear()
 
 # ================================
 # CAMERA CAPTURE & MQTT SENDING
@@ -180,7 +154,7 @@ def camera_capture():
     if result is None:
         print("[PIPE] Local AI failed, trying Cloud...")
         try:
-            result = send_image_cloud(image_bytes)
+            result = http_controller.send_image_cloud(image_bytes)
             if result:
                 print(f"[PIPE] Cloud succeeded: {result}")
                 inference_id = "cloud"
@@ -199,83 +173,6 @@ def camera_capture():
         print("[PIPE] ALL SOURCES FAILED, no action taken.")
         capture_event.clear()  # handle_final_result also clears it, so only clear here on total failure
 
-    
-# ================================
-# SEND HTTP REQUEST I THINK
-# ================================
-API_URL = "https://zoax1qwl2f.execute-api.us-east-1.amazonaws.com/bin"
-
-def send_bin_levels_http(bin_levels):
-    try:
-        response = requests.post(API_URL, json=bin_levels)
-        if response.status_code == 200:
-            print(f"[HTTP] Sent bin levels, status: {response.status_code}")
-        else:
-            print(f"[HTTP] Failed to send bin levels, status: {response.status_code}")
-            save_to_local_log(bin_levels)
-    except Exception as e:
-        print(f"[HTTP] Failed: {e}")
-        save_to_local_log(bin_levels)
-
-
-LOG_FILE = "offline_bin_logs.jsonl"
-
-def save_to_local_log(data):
-    try:
-        with open(LOG_FILE, "a") as f:
-            f.write(json.dumps(data) + "\n")
-        print("[LOG] Saved data locally")
-    except Exception as e:
-        print(f"[LOG ERROR] Could not write to file: {e}")
-
-BATCH_SIZE = 10
-
-def resend_offline_logs():
-    try:
-        with open(LOG_FILE, "r") as f:
-            lines = f.readlines()
-    except FileNotFoundError:
-        return
-
-    remaining_lines = []
-
-    # Process in batches
-    for i in range(0, len(lines), BATCH_SIZE):
-        batch = lines[i:i+BATCH_SIZE]
-        data_batch = [json.loads(line) for line in batch]
-
-        try:
-            response = requests.post(API_URL + "/batch", json=data_batch, timeout=3)
-
-            if response.status_code == 200:
-                print(f"[RETRY] Sent batch of {len(batch)} logs")
-            else:
-                print("[RETRY] Batch failed")
-                remaining_lines.extend(batch)
-
-        except:
-            print("[RETRY] Network error, keeping batch")
-            remaining_lines.extend(batch)
-
-    # Rewrite file with failed logs only
-    with open(LOG_FILE, "w") as f:
-        f.writelines(remaining_lines)
-    
-
-CLOUD_MODEL_URL = "http://3.93.218.220:5000/infer"
-def send_image_cloud(image_bytes):
-    try:
-        response = requests.post(CLOUD_MODEL_URL, data=image_bytes)
-        if response.status_code == 200:
-            result = response.json().get("label")
-            print(f"[CLOUD] Received result: {result}")
-            return result
-        else:
-            print(f"[CLOUD] Inference failed with status: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"[CLOUD] Failed to send image: {e}")
-        return None
 
 # ================================
 # ACTION AFTER RECEIVING MQTT RESULT
@@ -473,7 +370,7 @@ def monitor_detection():
 
     while SYSTEM_RUNNING:
         if time() - last_retry_time > 10:
-            resend_offline_logs() # attempt to send any failed logs every 10 seconds
+            http_controller.resend_offline_logs() # attempt to send any failed logs every 10 seconds
             last_retry_time = time()
 
         if hardware.seq_lock.locked() or capture_event.is_set():
@@ -556,7 +453,6 @@ def monitor_detection():
 
 if USE_MQTT and mqtt_publisher is not None:
     mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
-    # mqtt_publisher.subscribe_results(process_ai_detection) # for local
 
 # ================================
 # START SYSTEM
