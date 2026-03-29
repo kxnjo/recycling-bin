@@ -2,18 +2,43 @@
 import time
 import cv2
 from ultralytics import YOLO
+
+# mobilenet
+import torch
+from torchvision import transforms, models
+MOBILENET_CLASSES = ["general", "paper", "plastic"]
+
 import config
 import numpy as np
-# print(f"Loading custom YOLO Classification model from {config.MODEL_PATH}...")
-# model = YOLO(config.MODEL_PATH)
 
 model = None 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def init_model():
     global model
+    path_lower = config.MODEL_PATH.lower()
+
     if model is not None:
         return
-    print(f"Loading YOLO model from {config.MODEL_PATH}...")
-    model = YOLO(config.MODEL_PATH)
+    
+    if "yolo" in path_lower:
+        print(f"Loading YOLO model from {config.MODEL_PATH}...")
+        model = YOLO(config.MODEL_PATH)
+        
+    elif "mobilenet" in path_lower:
+        print(f"Loading MobileNetV3 model from {config.MODEL_PATH}...")
+        
+        model = models.mobilenet_v3_small(num_classes=len(MOBILENET_CLASSES))
+        
+        state_dict = torch.load(config.MODEL_PATH, map_location=device)
+        
+        model.load_state_dict(state_dict)
+        
+        model = model.to(device)
+        model.eval() 
+        
+    else:
+        print(f"[ERROR] Unknown model type in path: {config.MODEL_PATH}")
     
 
 # def capture_and_infer():
