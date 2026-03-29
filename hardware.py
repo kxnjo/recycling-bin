@@ -8,6 +8,7 @@ import RPi.GPIO as GPIO
 
 # Lock prevents re-triggering while busy
 seq_lock = Lock()
+sensor_lock = Lock()
 
 # --- Initialize Buttons ---
 button1 = Button(config.BTN_1_PIN, pull_up=True)
@@ -55,26 +56,29 @@ def read_ultrasonic_sensor(sensor_key):
     if sensor_key not in config.BIN_CONFIGS: return None
     trig, echo = config.BIN_CONFIGS[sensor_key]['trigger'], config.BIN_CONFIGS[sensor_key]['echo']
 
-    # 10us Pulse
-    GPIO.output(trig, True)
-    sleep(0.00001)
-    GPIO.output(trig, False)
+    # Acquire the lock to ensure no other thread can use the ultrasonic pins right now
+    with sensor_lock:
+        # 10us Pulse
+        GPIO.output(trig, True)
+        sleep(0.00001)
+        GPIO.output(trig, False)
 
-    start_time = time()
-    pulse_start, pulse_end = None, None
+        start_time = time()
+        pulse_start, pulse_end = None, None
 
-    # Wait for echo START (0.1s timeout)
-    while GPIO.input(echo) == 0:
-        pulse_start = time()
-        if pulse_start - start_time > 0.1: return None
+        # Wait for echo START (0.1s timeout)
+        while GPIO.input(echo) == 0:
+            pulse_start = time()
+            if pulse_start - start_time > 0.1: return None
 
-    # Wait for echo END (0.1s timeout)
-    while GPIO.input(echo) == 1:
-        pulse_end = time()
-        if pulse_end - pulse_start > 0.1: return None
+        # Wait for echo END (0.1s timeout)
+        while GPIO.input(echo) == 1:
+            pulse_end = time()
+            if pulse_end - pulse_start > 0.1: return None
 
-    if pulse_start and pulse_end:
-        return ((pulse_end - pulse_start) * 34300) / 2
+        if pulse_start and pulse_end:
+            return ((pulse_end - pulse_start) * 34300) / 2
+            
     return None
 
 

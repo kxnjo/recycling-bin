@@ -51,7 +51,7 @@
 set -e
 cd /home/dougey/Desktop/recycling-bin
 
-exec /home/dougey/Desktop/recycling-bin/.venv/bin/python /home/dougey/Desktop/recycling-bin/main_threading.py
+exec /home/dougey/Desktop/recycling-bin/.venv/bin/python /home/dougey/Desktop/recycling-bin/main.py
 
 # to update .sh, run the following
 # 1. chmod +x boot.sh

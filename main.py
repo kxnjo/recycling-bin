@@ -2,22 +2,29 @@
 from threading import Thread, Event
 from signal import pause
 from time import sleep, time
-from unittest import result
 import cv2
 import RPi.GPIO as GPIO
 
 import config
 import hardware
 import ai_vision
+
 # MQTT
-import mqtt_publisher
-capture_event = Event()
-# HTTP
-import requests
-import http_controller
+try:
+    import mqtt_publisher
+    USE_MQTT = True
+    capture_event = Event()
+    print("[MQTT] mqtt_publisher loaded successfully.")
+except ImportError:
+    mqtt_publisher = None
+    USE_MQTT = False
+    print("[MQTT] mqtt_publisher not found. MQTT disabled.")
+
 #MQTT QoS Test
 import uuid
 import json
+
+import http_controller
 
 inference_event = Event()
 inference_result = {"label": None}
@@ -35,6 +42,26 @@ def handle_button_press(btn):
 hardware.button1.when_pressed = lambda: handle_button_press(hardware.button1)
 hardware.button2.when_pressed = lambda: handle_button_press(hardware.button2)
 hardware.button3.when_pressed = lambda: handle_button_press(hardware.button3)
+
+
+# ======= THREADING FUNCTIONS =======
+def process_levels_and_http(label, inference_id):
+    """
+    Runs in the background to calculate levels and send HTTP/MQTT updates
+    while the main thread goes back to detecting the next item.
+    """
+    print("[BACKGROUND THREAD] Calculating bin levels...")
+    
+    # Read the depth sensors
+    bin_levels = hardware.update_bin_levels()
+    bin_levels['label'] = label
+    bin_levels['timestamp'] = int(time())
+    bin_levels['inference_id'] = inference_id
+    
+    print("[BACKGROUND THREAD] Sending data to Manager Pi / Cloud...")
+    http_controller.send_bin_levels_http(bin_levels)
+    print("[BACKGROUND THREAD] Update complete.")
+
 
 # ================================
 # CAMERA CAPTURE & MQTT SENDING
@@ -75,41 +102,39 @@ def camera_capture():
     # ======================
     # 1. TRY MQTT (blocking wait)
     # ======================
-    print("[PIPE] Sending via MQTT, waiting for result...")
-    message = {
-        "id": current_request_id,
-        "image": image_bytes.hex()
-    }
-    # mqtt_publisher.send_image(json.dumps(message), qos=1)
+    if USE_MQTT and mqtt_publisher is not None:
+        print("[PIPE] Sending via MQTT, waiting for result...")
+        message = {
+            "id": current_request_id,
+            "image": image_bytes.hex()
+        }
 
-    # if inference_event.wait(timeout=0.1):  # block here until MQTT responds or times out
-    #     result = inference_result["label"]
-    #     if result:
-    #         print(f"[PIPE] MQTT succeeded: {result}")
-    #         inference_id = "mqtt"
-    #     else:
-    #         print("[PIPE] MQTT returned empty label, falling through...")
-    #         result = None
-    mqtt_ok = mqtt_publisher.send_image(json.dumps(message), qos=1)
+        try:
+            mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    if mqtt_ok and inference_event.wait(timeout=0.3):
-        result = inference_result["label"]
-        if result:
-            print(f"[PIPE] MQTT succeeded: {result}")
-            inference_id = "mqtt"
-        else:
+            if inference_event.wait(timeout=3):
+                result = inference_result["label"]
+                if result:
+                    print(f"[PIPE] MQTT succeeded: {result}")
+                    inference_id = "mqtt"
+                else:
+                    print("[PIPE] MQTT returned empty label, falling through...")
+                    result = None
+            else:
+                print("[PIPE] MQTT timeout, falling back...")
+        except Exception as e:
+            print(f"[PIPE] MQTT failed: {e}")
             result = None
     else:
-        print("[PIPE] MQTT unavailable → fallback")
+        print("[PIPE] MQTT disabled, skipping MQTT stage...")
 
     # ======================
     # 2. TRY LOCAL AI (only if MQTT failed)
     # ======================
     if result is None:
-        print("[PIPE] MQTT failed ? trying Local AI...")
+        print("[PIPE] MQTT failed/skipped, trying Local AI...")
         try:
-            #result = ai_vision.infer_frame(frame)  # assumed blocking
-            result = ai_vision.infer(frame=frame) # new version that takes frame directly
+            result = ai_vision.infer(frame)  # assumed blocking
             if result:
                 print(f"[PIPE] Local AI succeeded: {result}")
                 inference_id = "local"
@@ -124,7 +149,7 @@ def camera_capture():
     # 3. TRY CLOUD (only if local also failed)
     # ======================
     if result is None:
-        print("[PIPE] Local AI failed ? trying Cloud...")
+        print("[PIPE] Local AI failed, trying Cloud...")
         try:
             result = http_controller.send_image_cloud(image_bytes)
             if result:
@@ -181,25 +206,34 @@ def handle_inference_result(msg):
 def handle_final_result(result, inference_id):
     print("[FINAL RESULT]:", result)
     print("[FINAL]: DONE BY:", inference_id)
+    
+    # 1. Start the sorting sequence
     if result.lower() == "plastic":
-        Thread(target=hardware.run_sequence, args=(90,), daemon=True).start()
+        angle = 90
     elif result.lower() == "paper":
-        Thread(target=hardware.run_sequence, args=(180,), daemon=True).start()
+        angle = 180
     else:
-        Thread(target=hardware.run_sequence, args=(0,), daemon=True).start()
+        angle = 0
+        
+    Thread(target=hardware.run_sequence, args=(angle,), daemon=True).start()
 
-    hardware.seq_lock.acquire()
+    # 2. Wait for the hardware sequence to finish (servo drops item and returns home)
+    sleep(0.1) # Brief pause to ensure the hardware thread acquires the lock first
+    hardware.seq_lock.acquire() 
     try:
-        bin_levels = hardware.update_bin_levels()
-        bin_levels['label'] = result
-        bin_levels['timestamp'] = int(time())
-        bin_levels['inference_id'] = inference_id
-        http_controller.send_bin_levels_http(bin_levels)
-    finally:
-        hardware.seq_lock.release()  # ALWAYS releases, even if exception thrown
-        capture_event.clear()
+        hardware.seq_lock.release()
+    except:
+        pass
+    
+    # 3. Servo is home! Spawn the HTTP/Level checking thread
+    Thread(target=process_levels_and_http, args=(result, inference_id), daemon=True).start()
+
+    # 4. Instantly clear the capture event so monitor_detection can find the next item
+    capture_event.clear()
+
+    
 # ================================
-# ÃÆÃÂ°Ãâ€¦ÃÂ¸ÃÂ¢Ã¢â€Â¬ÃÅÃÂ¢Ã¢â¬Å¡ÃÂ¬ DISTANCE MONITOR
+# DISTANCE MONITOR
 # ================================
 ultra_history = []
 ULTRA_HISTORY_SIZE = 5
@@ -223,19 +257,58 @@ prev_frame = None
 def get_frame():
     global fallback_cap
 
+    # Use fallback camera if already started
     if fallback_cap is not None:
-        # Use persistent camera
-        ret, frame = fallback_cap.read()
-        return ret, frame
+        cap = fallback_cap
+        using_fallback = True
     else:
-        # Create a one-shot capture
         cap = cv2.VideoCapture(0)
-        if not cap.isOpened():
-            print("[ERROR] Camera not available")
-            return False, None
-        ret, frame = cap.read()
+        using_fallback = False
+
+        # do optimization on the camera frames
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        # Optional manual camera settings
+        # Uncomment these only if auto exposure is causing bad frames
+        # Note: exact behavior depends on webcam/driver
+        # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)   # sometimes manual mode
+        # cap.set(cv2.CAP_PROP_EXPOSURE, -6)       # try -4 to -8
+        # cap.set(cv2.CAP_PROP_GAIN, 0)
+
+    if not cap.isOpened():
+        print("[ERROR] Camera not available")
+        return False, None
+
+    # If newly opened camera, discard first few unstable frames
+    if not using_fallback:
+        for _ in range(8):
+            ret, frame = cap.read()
+            if not ret:
+                print("[WARNING] Failed to read warm-up frame")
+
+    # Actual frame to use
+    ret, frame = cap.read()
+
+    # make sure that everythihng is captured properly
+    if not ret or frame is None:
+        print("[ERROR] Failed to capture frame")
+        if fallback_cap is None:
+            cap.release()
+        return False, None
+    
+    # Optional brightness debug check
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    avg_brightness = gray.mean()
+    print(f"[CAMERA] Average brightness: {avg_brightness:.2f}")
+
+    if avg_brightness < 25:
+        print("[WARNING] Captured frame is very dark")
+
+    if fallback_cap is None:
         cap.release()
-        return ret, frame
+
+    return ret, frame
 
 def start_fallback_camera():
     global fallback_cap
@@ -288,7 +361,6 @@ prev_distance = None
 
 def monitor_detection():
     state = DetectState.ULTRASONIC
-
     fail_count = 0
     last_retry_time = 0
     global ultra_history
@@ -371,14 +443,13 @@ def monitor_detection():
             if healthy:
                 print("[ð] Ultrasonic recovering...")
                 stop_fallback_camera()
-                prev_frame = None
                 state = DetectState.ULTRASONIC
                 fail_count = 0
 
         sleep(0.1)
 
-mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
-#mqtt_publisher.subscribe_results(process_ai_detection) # for local
+if USE_MQTT and mqtt_publisher is not None:
+    mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
 
 # ================================
 # START SYSTEM
