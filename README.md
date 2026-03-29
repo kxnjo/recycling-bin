@@ -18,13 +18,65 @@ The objective of this project is to apply Edge Computing techniques. Specificall
 - **Objective 3:** Provide *real-time data insights* via a dedicated dashboard.
 - **Objective 4:** To **minimize power consumption** using an event-driven approach.
 
-By the end of this project, swiftly perform item classification and automated sorting within xx seconds.
-
 ---
+## Project Structure
+
+```
+recycling-bin
+├── models/
+│   ├── 1_best_100epoch.pt      ← YOLO v8 Model
+│   └── mobilenetv3_best.pt     ← MobileNetV3
+├── smartbin-dashboard/
+│   ├── App.jsx                 ← React Dashboard
+├── requirements.txt            ← install packages
+├── boot.sh                     ← script to execute the app upon Raspberry Pi startup
+├── config.py                   ← Configure GPIO Pins, Broker IP information
+├── main.py                     ← Main app execution
+├── mqtt_publisher.py           ← MQTT publisher helper functions
+├── hardware.py                 ← Servo Motors and Ultrasonic Control
+├── ai_vision.py                ← Model Inference functions
+├── pi_2_main.py                ← Pi #2 execution code 
+├── dashboard-backend.py        ← Dashboard Flask Backend
+
+└── http_controller.py          ← HTTP handler to send information to dashboard
+```
+
+## Project Setup
+Install packages
+```
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+sudo apt update
+sudo apt install swig build-essential python3-dev -y
+sudo apt install liblgpio-dev -y
+pip install rpi-lgpio
+```
+
+Configure BROKER_IP in config.py
+
+
+On Raspberry Pi #1
+```
+python main.py
+```
+Raspberry Pi #2
+```
+python pi_2_main.py
+```
+## User Dashboard
+
+Local
+```
+cd smartbin-dashboard
+npm run dev
+```
+OR
+
+View the cloud dashboard [here](http://edgeproj.s3-website-us-east-1.amazonaws.com/).
 
 ## Architecture
-
-
 
 ![Architecture Diagram](architecture.png)
 
