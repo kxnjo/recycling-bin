@@ -163,7 +163,7 @@ def camera_capture():
     if result is None:
         print("[PIPE] MQTT failed/skipped, trying Local AI...")
         try:
-            result = ai_vision.infer_frame(frame)  # assumed blocking
+            result = ai_vision.infer(frame)  # assumed blocking
             if result:
                 print(f"[PIPE] Local AI succeeded: {result}")
                 inference_id = "local"
