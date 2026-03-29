@@ -193,8 +193,11 @@ def init_model():
 
 def infer(frame=None, image_bytes=None):
     if model is None:
-        print("[ERROR] Model not loaded")
-        return "general"
+        try:
+            init_model()
+        except:
+            print("[ERROR] Model not loaded")
+            return "general"
 
     # Get frame from whichever source was provided
     if frame is None and image_bytes is not None:
