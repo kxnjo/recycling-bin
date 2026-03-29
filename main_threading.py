@@ -2,16 +2,24 @@
 from threading import Thread, Event
 from signal import pause
 from time import sleep, time
-from unittest import result
 import cv2
 import RPi.GPIO as GPIO
 
 import config
 import hardware_threading as hardware
 import ai_vision
+
 # MQTT
-import mqtt_publisher
-capture_event = Event()
+try:
+    import mqtt_publisher
+    USE_MQTT = True
+    capture_event = Event()
+    print("[MQTT] mqtt_publisher loaded successfully.")
+except ImportError:
+    mqtt_publisher = None
+    USE_MQTT = False
+    print("[MQTT] mqtt_publisher not found. MQTT disabled.")
+
 # HTTP
 import requests
 
@@ -54,9 +62,6 @@ def process_levels_and_http(label, inference_id):
     print("[BACKGROUND THREAD] Sending data to Manager Pi / Cloud...")
     send_bin_levels_http(bin_levels)
     print("[BACKGROUND THREAD] Update complete.")
-
-
-
 
 
 # ================================
@@ -126,27 +131,37 @@ def camera_capture():
     # ======================
     # 1. TRY MQTT (blocking wait)
     # ======================
-    print("[PIPE] Sending via MQTT, waiting for result...")
-    message = {
-        "id": current_request_id,
-        "image": image_bytes.hex()
-    }
-    mqtt_publisher.send_image(json.dumps(message), qos=1)
+    if USE_MQTT and mqtt_publisher is not None:
+        print("[PIPE] Sending via MQTT, waiting for result...")
+        message = {
+            "id": current_request_id,
+            "image": image_bytes.hex()
+        }
 
-    if inference_event.wait(timeout=3):  # block here until MQTT responds or times out
-        result = inference_result["label"]
-        if result:
-            print(f"[PIPE] MQTT succeeded: {result}")
-            inference_id = "mqtt"
-        else:
-            print("[PIPE] MQTT returned empty label, falling through...")
+        try:
+            mqtt_publisher.send_image(json.dumps(message), qos=1)
+
+            if inference_event.wait(timeout=3):
+                result = inference_result["label"]
+                if result:
+                    print(f"[PIPE] MQTT succeeded: {result}")
+                    inference_id = "mqtt"
+                else:
+                    print("[PIPE] MQTT returned empty label, falling through...")
+                    result = None
+            else:
+                print("[PIPE] MQTT timeout, falling back...")
+        except Exception as e:
+            print(f"[PIPE] MQTT failed: {e}")
             result = None
+    else:
+        print("[PIPE] MQTT disabled, skipping MQTT stage...")
 
     # ======================
     # 2. TRY LOCAL AI (only if MQTT failed)
     # ======================
     if result is None:
-        print("[PIPE] MQTT failed ? trying Local AI...")
+        print("[PIPE] MQTT failed/skipped, trying Local AI...")
         try:
             result = ai_vision.infer_frame(frame)  # assumed blocking
             if result:
@@ -163,7 +178,7 @@ def camera_capture():
     # 3. TRY CLOUD (only if local also failed)
     # ======================
     if result is None:
-        print("[PIPE] Local AI failed ? trying Cloud...")
+        print("[PIPE] Local AI failed, trying Cloud...")
         try:
             result = send_image_cloud(image_bytes)
             if result:
@@ -311,7 +326,10 @@ def handle_final_result(result, inference_id):
     # 2. Wait for the hardware sequence to finish (servo drops item and returns home)
     sleep(0.1) # Brief pause to ensure the hardware thread acquires the lock first
     hardware.seq_lock.acquire() 
-    hardware.seq_lock.release() 
+    try:
+        hardware.seq_lock.release()
+    except:
+        pass
     
     # 3. Servo is home! Spawn the HTTP/Level checking thread
     Thread(target=process_levels_and_http, args=(result, inference_id), daemon=True).start()
@@ -500,30 +518,9 @@ def monitor_detection():
 
         sleep(0.1)
 
-# def monitor_detection():
-#     """Continuously monitor the 'd' sensor and trigger AI."""
-#     detect_sensor = hardware.sensors['d']
-    
-#     while True:
-#         if not hardware.seq_lock.locked() and not capture_event.is_set():
-#             try:
-#                 distance = detect_sensor.distance * 100  # cm
-#                 if 0 < distance <= config.DETECT_THRESHOLD:
-#                     print(f"\n[DETECT] Object detected at {round(distance, 1)} cm!")
-                    
-#                     # Lock the capture event and spin up AI thread
-#                     camera_capture()
-#                     capture_event.clear()
-#                     # Thread(target=camera_capture, daemon=True).start()
-                    
-#                     sleep(2) # Cooldown
-#             except Exception as e:
-#                 print(f"[ERROR] Sensor read failed: {e}")
-        
-#         sleep(0.1)
-
-mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
-#mqtt_publisher.subscribe_results(process_ai_detection) # for local
+if USE_MQTT and mqtt_publisher is not None:
+    mqtt_publisher.subscribe_results(handle_inference_result) # get prediction from model <= Pi 2 MQTT
+    # mqtt_publisher.subscribe_results(process_ai_detection) # for local
 
 # ================================
 # START SYSTEM
