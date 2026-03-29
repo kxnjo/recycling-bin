@@ -20,24 +20,63 @@ def bin_data():
         if not data:
             return jsonify({"error": "No JSON payload received"}), 400
         
-        latest_bin_data.update(data)
-
-        # Save to DynamoDB
+        latest_bin_data = data.copy()
         table.put_item(Item={
             'timestamp': data['timestamp'],
             'a': str(data.get('a', 0)),
             'b': str(data.get('b', 0)),
             'c': str(data.get('c', 0)),
-            'label': data.get('label', '')
+            'label': data.get('label', ''),
+            'inference_id': data.get('inference_id', '')
         })
-
         return jsonify({"status": "success"}), 200
     else:
-        if latest_bin_data:
-            return jsonify(latest_bin_data)
-        else:
-            return jsonify({"message": "No data yet"}), 404
+        # Always query DynamoDB for the true latest record
+        try:
+            response = table.scan()
+            items = response['Items']
+            if not items:
+                return jsonify({"message": "No data yet"}), 404
+            latest = max(items, key=lambda x: int(x['timestamp']))
+            return jsonify({
+                'a': float(latest.get('a', 0)),
+                'b': float(latest.get('b', 0)),
+                'c': float(latest.get('c', 0)),
+                'label': latest.get('label', ''),
+                'timestamp': int(latest['timestamp']),
+                'inference_id': latest.get('inference_id', '')
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
+# Batch endpoint for multiple records at once (used for retrying offline logs)
+@app.route("/batch", methods=["POST"])
+def batch_bin_data():
+    try:
+        data_list = request.get_json()
+
+        if not isinstance(data_list, list):
+            return jsonify({"error": "Expected a list of items"}), 400
+
+        with table.batch_writer() as batch:
+            for data in data_list:
+                batch.put_item(Item={
+                    'timestamp': data['timestamp'],
+                    'a': str(data.get('a', 0)),
+                    'b': str(data.get('b', 0)),
+                    'c': str(data.get('c', 0)),
+                    'label': data.get('label', ''),
+                    'inference_id': data.get('inference_id', '')
+                })
+
+        return jsonify({
+            "status": "success",
+            "inserted": len(data_list)
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+        
 @app.route("/history", methods=["GET"])
 def get_history():
     try:

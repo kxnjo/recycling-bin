@@ -31,13 +31,14 @@ function getEventType(val) {
 
 function formatTime(ts) {
   const d = ts ? new Date(ts * 1000) : new Date();
-  return d.toLocaleString("en-SG", {
+  return d.toLocaleString("en-SG", { 
+    timeZone: "Asia/Singapore",
     day: "2-digit",
-    month: "short",
+    month: "short", 
     year: "numeric",
-    hour: "2-digit",
+    hour: "2-digit", 
     minute: "2-digit",
-    second: "2-digit",
+    second: "2-digit"
   });
 }
 
@@ -434,7 +435,8 @@ export default function App() {
 
       {/* ── History Table ── */}
       <div>
-        <div className="flex items-center gap-2 mb-5">
+        
+        <div className="flex items-center gap-2 mb-5 ">
           <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
           <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
             Full History
@@ -442,6 +444,7 @@ export default function App() {
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+          <div className = "max-h-[400px] overflow-y-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[10px] font-bold text-gray-400 uppercase tracking-widest border-b border-gray-100">
@@ -466,9 +469,9 @@ export default function App() {
                       {row.label || "—"}
                     </span>
                   </td>
-                  <td className="py-3 text-gray-700 font-semibold">{row.a}%</td>
-                  <td className="py-3 text-gray-700 font-semibold">{row.b}%</td>
-                  <td className="py-3 text-gray-700 font-semibold">{row.c}%</td>
+                  <td className="py-3 text-gray-700 font-semibold">{getBinFillPercent(row.a)}%</td>
+                  <td className="py-3 text-gray-700 font-semibold">{getBinFillPercent(row.b)}%</td>
+                  <td className="py-3 text-gray-700 font-semibold">{getBinFillPercent(row.c)}%</td>
                 </tr>
               ))}
               {history.length === 0 && (
@@ -483,6 +486,7 @@ export default function App() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
       </div>
     </div>
