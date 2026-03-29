@@ -25,6 +25,7 @@ The objective of this project is to apply Edge Computing techniques. Specificall
 recycling-bin
 ├── models/
 │   ├── 1_best_100epoch.pt      ← YOLO v8 Model
+│   ├── yolo_2_best_50epoch.p   ← YOLO v8 Model (running on 50epoch)
 │   └── mobilenetv3_best.pt     ← MobileNetV3
 ├── smartbin-dashboard/
 │   ├── App.jsx                 ← React Dashboard
