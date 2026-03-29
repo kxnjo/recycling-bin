@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # 1. check github version
 # REPO = "https://github.com/kxnjo/recycling-bin/main"
 # VERSION_FILE = "version.txt"
@@ -46,10 +48,10 @@
 # send ping to endpoint
 
 # 2. activate .venv
-/home/dougey/Desktop/recycling-bin/.venv/bin/python 
+set -e
+cd /home/dougey/Desktop/recycling-bin
 
-# 3. run the script
-/home/dougey/Desktop/recycling-bin/main_threading.py
+exec /home/dougey/Desktop/recycling-bin/.venv/bin/python /home/dougey/Desktop/recycling-bin/main_threading.py
 
 # to update .sh, run the following
 # 1. chmod +x boot.sh
