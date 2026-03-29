@@ -163,7 +163,7 @@ def camera_capture():
     if result is None:
         print("[PIPE] MQTT failed/skipped, trying Local AI...")
         try:
-            result = ai_vision.infer_frame(frame)  # assumed blocking
+            result = ai_vision.infer(frame)  # assumed blocking
             if result:
                 print(f"[PIPE] Local AI succeeded: {result}")
                 inference_id = "local"
@@ -366,14 +366,50 @@ def get_frame():
     # Use fallback camera if already started
     if fallback_cap is not None:
         cap = fallback_cap
+        using_fallback = True
     else:
         cap = cv2.VideoCapture(0)
+        using_fallback = False
+
+        # do optimization on the camera frames
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        # Optional manual camera settings
+        # Uncomment these only if auto exposure is causing bad frames
+        # Note: exact behavior depends on webcam/driver
+        # cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)   # sometimes manual mode
+        # cap.set(cv2.CAP_PROP_EXPOSURE, -6)       # try -4 to -8
+        # cap.set(cv2.CAP_PROP_GAIN, 0)
 
     if not cap.isOpened():
         print("[ERROR] Camera not available")
         return False, None
 
+    # If newly opened camera, discard first few unstable frames
+    if not using_fallback:
+        for _ in range(8):
+            ret, frame = cap.read()
+            if not ret:
+                print("[WARNING] Failed to read warm-up frame")
+
+    # Actual frame to use
     ret, frame = cap.read()
+
+    # make sure that everythihng is captured properly
+    if not ret or frame is None:
+        print("[ERROR] Failed to capture frame")
+        if fallback_cap is None:
+            cap.release()
+        return False, None
+    
+    # Optional brightness debug check
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    avg_brightness = gray.mean()
+    print(f"[CAMERA] Average brightness: {avg_brightness:.2f}")
+
+    if avg_brightness < 25:
+        print("[WARNING] Captured frame is very dark")
 
     if fallback_cap is None:
         cap.release()
