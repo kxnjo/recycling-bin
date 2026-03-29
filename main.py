@@ -80,16 +80,27 @@ def camera_capture():
         "id": current_request_id,
         "image": image_bytes.hex()
     }
-    mqtt_publisher.send_image(json.dumps(message), qos=1)
+    # mqtt_publisher.send_image(json.dumps(message), qos=1)
 
-    if inference_event.wait(timeout=0.1):  # block here until MQTT responds or times out
+    # if inference_event.wait(timeout=0.1):  # block here until MQTT responds or times out
+    #     result = inference_result["label"]
+    #     if result:
+    #         print(f"[PIPE] MQTT succeeded: {result}")
+    #         inference_id = "mqtt"
+    #     else:
+    #         print("[PIPE] MQTT returned empty label, falling through...")
+    #         result = None
+    mqtt_ok = mqtt_publisher.send_image(json.dumps(message), qos=1)
+
+    if mqtt_ok and inference_event.wait(timeout=0.3):
         result = inference_result["label"]
         if result:
             print(f"[PIPE] MQTT succeeded: {result}")
             inference_id = "mqtt"
         else:
-            print("[PIPE] MQTT returned empty label, falling through...")
             result = None
+    else:
+        print("[PIPE] MQTT unavailable → fallback")
 
     # ======================
     # 2. TRY LOCAL AI (only if MQTT failed)
