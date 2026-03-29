@@ -16,7 +16,7 @@ model_type = None
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def init_model():
-    global model
+    global model, model_type
     path_lower = config.MODEL_PATH.lower()
 
     if model is not None:
